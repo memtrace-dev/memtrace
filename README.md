@@ -153,6 +153,20 @@ memory_forget(id: "01KMDX71NT...")    // delete by ID
 memory_forget(query: "old approach")  // delete top match
 ```
 
+### `memory_update`
+
+Update an existing memory by ID. Only provided fields are changed.
+
+```
+memory_update(
+  id:         "01KMDX71NT...",
+  content:    "Updated content",
+  type:       "decision",
+  tags:       ["auth"],
+  confidence: 0.8
+)
+```
+
 ---
 
 ## Memory types
@@ -181,16 +195,34 @@ Skip with `--no-import` if you want a clean start.
 ## CLI Reference
 
 ```
-memtrace init [--name <name>] [--no-import]
-memtrace save <content> [--type decision|convention|fact|event] [--tags auth,api] [--files src/auth.go] [--confidence 0.9]
-memtrace update <id|prefix> [--content "..."] [--type ...] [--tags ...] [--files ...] [--confidence 0.9]
-memtrace search <query> [--limit 10] [--type decision] [--json]
-memtrace list [--limit 20] [--type convention] [--status active] [--json]
-memtrace rm <id|prefix>
-memtrace export [--output memories.json] [--type decision] [--status active]
-memtrace serve [--dir <path>]
-memtrace status [--json]
+memtrace init    [--name <name>] [--no-import]
+memtrace save    <content> [--type decision|convention|fact|event] [--tags auth,api] [--files src/auth.go] [--confidence 0.9]
+memtrace update  <id|prefix> [--content "..."] [--type ...] [--tags ...] [--files ...] [--confidence 0.9]
+memtrace edit    <id|prefix>
+memtrace search  <query> [--limit 10] [--type decision] [--json]
+memtrace list    [--limit 20] [--type convention] [--status active] [--json]
+memtrace rm      <id|prefix>
+memtrace export  [--output memories.json] [--type decision] [--status active]
+memtrace import  <file|url> [--type decision] [--dry-run]
+memtrace serve   [--dir <path>]
+memtrace status  [--json]
 ```
+
+---
+
+## Semantic search
+
+When an embedding API is configured, `memory_recall` and `memtrace search` switch to hybrid BM25 + semantic (cosine similarity) scoring — giving better results for paraphrased or conceptually related queries.
+
+Set these environment variables (any OpenAI-compatible endpoint works, including Ollama):
+
+```bash
+MEMTRACE_EMBED_KEY=sk-...          # API key (or OPENAI_API_KEY)
+MEMTRACE_EMBED_URL=https://api.openai.com/v1   # optional, default shown
+MEMTRACE_EMBED_MODEL=text-embedding-3-small    # optional, default shown
+```
+
+Without these variables, memtrace falls back to BM25-only search.
 
 ---
 

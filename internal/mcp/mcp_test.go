@@ -329,6 +329,72 @@ func TestMemoryForgetTool_ByIDNotFound(t *testing.T) {
 	}
 }
 
+// --- memory_update tool ---
+
+func TestMemoryUpdateTool_Content(t *testing.T) {
+	s, k := setupServer(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "original content"})
+
+	result := callTool(t, s, "memory_update", map[string]interface{}{
+		"id":      mem.ID,
+		"content": "updated content",
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "Updated memory") {
+		t.Errorf("expected update confirmation, got: %s", text)
+	}
+
+	got, _ := k.Get(mem.ID)
+	if got.Content != "updated content" {
+		t.Errorf("want 'updated content', got %q", got.Content)
+	}
+}
+
+func TestMemoryUpdateTool_TypeAndTags(t *testing.T) {
+	s, k := setupServer(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "some fact", Type: types.MemoryTypeFact})
+
+	callTool(t, s, "memory_update", map[string]interface{}{
+		"id":   mem.ID,
+		"type": "decision",
+		"tags": []interface{}{"auth", "security"},
+	})
+
+	got, _ := k.Get(mem.ID)
+	if got.Type != types.MemoryTypeDecision {
+		t.Errorf("want decision, got %s", got.Type)
+	}
+	if len(got.Tags) != 2 || got.Tags[0] != "auth" {
+		t.Errorf("unexpected tags: %v", got.Tags)
+	}
+}
+
+func TestMemoryUpdateTool_NotFound(t *testing.T) {
+	s, _ := setupServer(t)
+
+	result := callTool(t, s, "memory_update", map[string]interface{}{
+		"id":      "01NONEXISTENTID0000000000X",
+		"content": "new content",
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "not found") {
+		t.Errorf("expected not-found message, got: %s", text)
+	}
+}
+
+func TestMemoryUpdateTool_MissingID(t *testing.T) {
+	s, _ := setupServer(t)
+
+	result := callTool(t, s, "memory_update", map[string]interface{}{
+		"content": "something",
+	})
+	if !result.IsError {
+		t.Error("expected error when id is missing")
+	}
+}
+
 func TestMemoryForgetTool_NoArgs(t *testing.T) {
 	s, _ := setupServer(t)
 

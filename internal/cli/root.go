@@ -14,10 +14,12 @@ func NewRootCmd() *cobra.Command {
 		newInitCmd(),
 		newSaveCmd(),
 		newUpdateCmd(),
+		newEditCmd(),
 		newSearchCmd(),
 		newListCmd(),
 		newRmCmd(),
 		newExportCmd(),
+		newImportCmd(),
 		newServeCmd(),
 		newStatusCmd(),
 	)

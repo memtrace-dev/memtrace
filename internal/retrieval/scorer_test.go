@@ -8,7 +8,7 @@ import (
 )
 
 func TestScoreCandidates_Empty(t *testing.T) {
-	results := scoreCandidates(nil, time.Now())
+	results := scoreCandidates(nil, time.Now(), nil)
 	if results != nil {
 		t.Error("expected nil for empty candidates")
 	}
@@ -37,7 +37,7 @@ func TestScoreCandidates_ScoreRange(t *testing.T) {
 		},
 	}
 
-	results := scoreCandidates(candidates, now)
+	results := scoreCandidates(candidates, now, nil)
 	if len(results) != 2 {
 		t.Fatalf("want 2 results, got %d", len(results))
 	}
@@ -50,23 +50,12 @@ func TestScoreCandidates_ScoreRange(t *testing.T) {
 
 func TestScoreCandidates_BetterBM25Wins(t *testing.T) {
 	now := time.Now()
-	// Both candidates identical except BM25 rank
 	candidates := []candidate{
-		{
-			memory: types.Memory{
-				ID: "high", Confidence: 1.0, CreatedAt: now,
-			},
-			bm25Rank: -10.0, // better match
-		},
-		{
-			memory: types.Memory{
-				ID: "low", Confidence: 1.0, CreatedAt: now,
-			},
-			bm25Rank: -1.0, // worse match
-		},
+		{memory: types.Memory{ID: "high", Confidence: 1.0, CreatedAt: now}, bm25Rank: -10.0},
+		{memory: types.Memory{ID: "low", Confidence: 1.0, CreatedAt: now}, bm25Rank: -1.0},
 	}
 
-	results := scoreCandidates(candidates, now)
+	results := scoreCandidates(candidates, now, nil)
 	if results[0].Memory.ID != "high" {
 		t.Errorf("expected high-rank match first, got %s", results[0].Memory.ID)
 	}
@@ -74,20 +63,12 @@ func TestScoreCandidates_BetterBM25Wins(t *testing.T) {
 
 func TestScoreCandidates_RecencyDecay(t *testing.T) {
 	now := time.Now()
-	recent := candidate{
-		memory: types.Memory{
-			ID: "recent", Confidence: 1.0, CreatedAt: now,
-		},
-		bm25Rank: -5.0,
-	}
-	old := candidate{
-		memory: types.Memory{
-			ID: "old", Confidence: 1.0, CreatedAt: now.Add(-365 * 24 * time.Hour),
-		},
-		bm25Rank: -5.0,
+	candidates := []candidate{
+		{memory: types.Memory{ID: "recent", Confidence: 1.0, CreatedAt: now}, bm25Rank: -5.0},
+		{memory: types.Memory{ID: "old", Confidence: 1.0, CreatedAt: now.Add(-365 * 24 * time.Hour)}, bm25Rank: -5.0},
 	}
 
-	results := scoreCandidates([]candidate{recent, old}, now)
+	results := scoreCandidates(candidates, now, nil)
 
 	var recentScore, oldScore float64
 	for _, r := range results {
@@ -105,11 +86,8 @@ func TestScoreCandidates_RecencyDecay(t *testing.T) {
 func TestScoreCandidates_AccessFrequency(t *testing.T) {
 	now := time.Now()
 	results := scoreCandidates([]candidate{
-		{
-			memory:   types.Memory{ID: "accessed", Confidence: 1.0, CreatedAt: now, AccessCount: 100},
-			bm25Rank: -5.0,
-		},
-	}, now)
+		{memory: types.Memory{ID: "accessed", Confidence: 1.0, CreatedAt: now, AccessCount: 100}, bm25Rank: -5.0},
+	}, now, nil)
 
 	if results[0].ScoreBreakdown.AccessFrequency == 0 {
 		t.Error("expected non-zero access frequency for count=100")
@@ -119,9 +97,36 @@ func TestScoreCandidates_AccessFrequency(t *testing.T) {
 	}
 }
 
+func TestScoreCandidates_HybridMode(t *testing.T) {
+	now := time.Now()
+	candidates := []candidate{
+		{memory: types.Memory{ID: "sem-winner", Confidence: 1.0, CreatedAt: now}, bm25Rank: -1.0},
+		{memory: types.Memory{ID: "bm25-winner", Confidence: 1.0, CreatedAt: now}, bm25Rank: -10.0},
+	}
+	semanticScores := map[string]float64{
+		"sem-winner":  0.99,
+		"bm25-winner": 0.01,
+	}
+
+	results := scoreCandidates(candidates, now, semanticScores)
+	if len(results) != 2 {
+		t.Fatalf("want 2 results, got %d", len(results))
+	}
+	if results[0].Memory.ID != "sem-winner" {
+		t.Errorf("expected sem-winner first in hybrid mode, got %s", results[0].Memory.ID)
+	}
+}
+
 func TestScoreBreakdown_WeightsSumToOne(t *testing.T) {
 	sum := weightText + weightRecency + weightConfidence + weightAccess
 	if sum < 0.999 || sum > 1.001 {
-		t.Errorf("weights must sum to 1.0, got %f", sum)
+		t.Errorf("BM25-only weights must sum to 1.0, got %f", sum)
+	}
+}
+
+func TestScoreBreakdown_HybridWeightsSumToOne(t *testing.T) {
+	sum := weightBM25 + weightSemantic + weightRecency + weightConfidence + weightAccess
+	if sum < 0.999 || sum > 1.001 {
+		t.Errorf("hybrid weights must sum to 1.0, got %f", sum)
 	}
 }

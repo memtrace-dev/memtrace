@@ -1,6 +1,9 @@
 package kernel
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+)
 
 const schemaSQL = `
 PRAGMA journal_mode = WAL;
@@ -68,8 +71,46 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
 END;
 `
 
-// ApplySchema applies the database schema and sets runtime PRAGMAs.
+// ApplySchema applies the database schema, sets runtime PRAGMAs, and runs migrations.
 func ApplySchema(db *sql.DB) error {
-	_, err := db.Exec(schemaSQL)
+	if _, err := db.Exec(schemaSQL); err != nil {
+		return err
+	}
+	return runMigrations(db)
+}
+
+// runMigrations applies incremental schema changes to existing databases.
+func runMigrations(db *sql.DB) error {
+	if err := addColumnIfMissing(db, "memories", "embedding", "TEXT DEFAULT NULL"); err != nil {
+		return fmt.Errorf("migration (embedding column): %w", err)
+	}
+	return nil
+}
+
+// addColumnIfMissing adds a column to a table only if it does not already exist.
+func addColumnIfMissing(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil // already exists
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition)
 	return err
 }

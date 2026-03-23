@@ -1,0 +1,134 @@
+// Package embedding provides an interface and HTTP client for computing
+// text embeddings via any OpenAI-compatible embeddings endpoint.
+//
+// Configuration (environment variables):
+//
+//	MEMTRACE_EMBED_URL   Base URL of the embeddings API (default: https://api.openai.com/v1)
+//	MEMTRACE_EMBED_MODEL Embedding model name        (default: text-embedding-3-small)
+//	MEMTRACE_EMBED_KEY   API key (falls back to OPENAI_API_KEY)
+package embedding
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+// Embedder computes a dense vector embedding for a text string.
+type Embedder interface {
+	Embed(text string) ([]float64, error)
+}
+
+// Client is an OpenAI-compatible embeddings client.
+type Client struct {
+	baseURL string
+	model   string
+	apiKey  string
+	http    *http.Client
+}
+
+// NewClientFromEnv creates a Client from environment variables.
+// Returns nil if no API key is configured — callers treat nil as "embeddings disabled".
+func NewClientFromEnv() *Client {
+	apiKey := os.Getenv("MEMTRACE_EMBED_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		return nil
+	}
+
+	baseURL := os.Getenv("MEMTRACE_EMBED_URL")
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	model := os.Getenv("MEMTRACE_EMBED_MODEL")
+	if model == "" {
+		model = "text-embedding-3-small"
+	}
+
+	return &Client{
+		baseURL: baseURL,
+		model:   model,
+		apiKey:  apiKey,
+		http:    &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+type embedRequest struct {
+	Input string `json:"input"`
+	Model string `json:"model"`
+}
+
+type embedResponse struct {
+	Data []struct {
+		Embedding []float64 `json:"embedding"`
+	} `json:"data"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+// Embed sends a single text to the embeddings API and returns the vector.
+func (c *Client) Embed(text string) ([]float64, error) {
+	body, err := json.Marshal(embedRequest{Input: text, Model: c.model})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("embedding request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result embedResponse
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("parsing embedding response: %w", err)
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("embedding API error: %s", result.Error.Message)
+	}
+	if len(result.Data) == 0 || len(result.Data[0].Embedding) == 0 {
+		return nil, fmt.Errorf("empty embedding returned for model %s", c.model)
+	}
+	return result.Data[0].Embedding, nil
+}
+
+// CosineSimilarity returns the cosine similarity between two equal-length vectors.
+// Returns 0 if either vector is zero-length or lengths differ.
+func CosineSimilarity(a, b []float64) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
+}

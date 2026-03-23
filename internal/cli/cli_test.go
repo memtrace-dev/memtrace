@@ -430,6 +430,145 @@ func TestExportCmd_TypeFilter(t *testing.T) {
 	}
 }
 
+// --- import ---
+
+func TestImportCmd_FromFile(t *testing.T) {
+	setupProject(t)
+
+	data := `[{"content":"imported decision","type":"decision"},{"content":"imported fact","type":"fact"}]`
+	f := filepath.Join(t.TempDir(), "memories.json")
+	os.WriteFile(f, []byte(data), 0644)
+
+	out, err := runCmd(t, "import", f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Imported 2") {
+		t.Errorf("expected 'Imported 2', got: %s", out)
+	}
+}
+
+func TestImportCmd_DryRun(t *testing.T) {
+	setupProject(t)
+
+	data := `[{"content":"memory one","type":"fact"},{"content":"memory two","type":"decision"}]`
+	f := filepath.Join(t.TempDir(), "memories.json")
+	os.WriteFile(f, []byte(data), 0644)
+
+	out, err := runCmd(t, "import", f, "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Would import 2") {
+		t.Errorf("expected dry-run summary, got: %s", out)
+	}
+}
+
+func TestImportCmd_TypeFilter(t *testing.T) {
+	setupProject(t)
+
+	data := `[{"content":"a decision","type":"decision"},{"content":"a fact","type":"fact"}]`
+	f := filepath.Join(t.TempDir(), "memories.json")
+	os.WriteFile(f, []byte(data), 0644)
+
+	out, err := runCmd(t, "import", f, "--type", "decision")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Imported 1") {
+		t.Errorf("expected 'Imported 1', got: %s", out)
+	}
+}
+
+func TestImportCmd_EmptyFile(t *testing.T) {
+	setupProject(t)
+
+	f := filepath.Join(t.TempDir(), "empty.json")
+	os.WriteFile(f, []byte(`[]`), 0644)
+
+	out, err := runCmd(t, "import", f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "No memories") {
+		t.Errorf("expected no-memories message, got: %s", out)
+	}
+}
+
+func TestImportCmd_FileNotFound(t *testing.T) {
+	setupProject(t)
+
+	_, err := runCmd(t, "import", "/nonexistent/path.json")
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+// --- edit ---
+
+func TestEditCmd_UpdatesContent(t *testing.T) {
+	k, _ := setupProject(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "original content"})
+
+	// Use a fake editor that overwrites the file with new content
+	fakeEditor := filepath.Join(t.TempDir(), "fake-editor.sh")
+	if err := os.WriteFile(fakeEditor, []byte("#!/bin/sh\nprintf 'edited content' > \"$1\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", fakeEditor)
+
+	out, err := runCmd(t, "edit", mem.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Updated") {
+		t.Errorf("expected update confirmation, got: %s", out)
+	}
+
+	got, _ := k.Get(mem.ID)
+	if got.Content != "edited content" {
+		t.Errorf("want 'edited content', got %q", got.Content)
+	}
+}
+
+func TestEditCmd_NoChange(t *testing.T) {
+	k, _ := setupProject(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "unchanged content"})
+
+	// Editor that leaves the file unchanged
+	fakeEditor := filepath.Join(t.TempDir(), "noop-editor.sh")
+	if err := os.WriteFile(fakeEditor, []byte("#!/bin/sh\n# no-op\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", fakeEditor)
+
+	out, err := runCmd(t, "edit", mem.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "No changes") {
+		t.Errorf("expected 'No changes' message, got: %s", out)
+	}
+}
+
+func TestEditCmd_NotFound(t *testing.T) {
+	setupProject(t)
+
+	fakeEditor := filepath.Join(t.TempDir(), "fake-editor.sh")
+	os.WriteFile(fakeEditor, []byte("#!/bin/sh\n"), 0755)
+	t.Setenv("EDITOR", fakeEditor)
+
+	out, err := runCmd(t, "edit", "01NONEXISTENTID0000000000X")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "not found") {
+		t.Errorf("expected not-found message, got: %s", out)
+	}
+}
+
 // --- status ---
 
 func TestStatusCmd_Basic(t *testing.T) {

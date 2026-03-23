@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/memtrace-dev/memtrace/internal/embedding"
 	"github.com/memtrace-dev/memtrace/internal/retrieval"
 	"github.com/memtrace-dev/memtrace/internal/types"
 	"github.com/memtrace-dev/memtrace/internal/util"
@@ -20,6 +21,7 @@ type MemoryKernel struct {
 	db        *sql.DB
 	store     *MemoryStore
 	pipeline  *retrieval.Pipeline
+	embedder  embedding.Embedder // nil when embeddings are not configured
 }
 
 // New creates a new MemoryKernel. Call Open() before any other method.
@@ -43,6 +45,12 @@ func (k *MemoryKernel) Open() error {
 	k.db = db
 	k.store = NewStore(db)
 	k.pipeline = retrieval.New(k.store, k.projectID) // MemoryStore satisfies retrieval.StoreReader
+
+	// Wire up optional embedder from environment variables.
+	if e := embedding.NewClientFromEnv(); e != nil {
+		k.embedder = e
+		k.pipeline.WithEmbedder(e)
+	}
 	return nil
 }
 
@@ -96,6 +104,17 @@ func (k *MemoryKernel) Save(input types.MemorySaveInput) (*types.Memory, error) 
 	if err := k.store.Insert(mem); err != nil {
 		return nil, fmt.Errorf("saving memory: %w", err)
 	}
+
+	// Compute and persist embedding asynchronously so Save() stays fast.
+	if k.embedder != nil {
+		go func(id, text string) {
+			vec, err := k.embedder.Embed(text)
+			if err == nil {
+				_ = k.store.StoreEmbedding(id, vec)
+			}
+		}(mem.ID, mem.Content)
+	}
+
 	return mem, nil
 }
 

@@ -169,6 +169,71 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel) {
 			return mcp.NewToolResultText("Provide either id or query."), nil
 		},
 	)
+
+	// Tool 4: memory_update
+	s.AddTool(
+		mcp.NewTool("memory_update",
+			mcp.WithDescription("Update an existing memory by ID. Only provided fields are changed."),
+			mcp.WithString("id",
+				mcp.Required(),
+				mcp.Description("The memory ID to update"),
+			),
+			mcp.WithString("content",
+				mcp.Description("New content"),
+			),
+			mcp.WithString("type",
+				mcp.Description("New type: decision, convention, fact, event"),
+			),
+			mcp.WithArray("tags",
+				mcp.Description(`New tags (replaces existing), e.g. ["auth", "api"]`),
+			),
+			mcp.WithArray("file_paths",
+				mcp.Description(`New file paths (replaces existing), e.g. ["src/auth.go"]`),
+			),
+			mcp.WithNumber("confidence",
+				mcp.Description("New confidence score 0.0–1.0"),
+			),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			id, _ := args["id"].(string)
+			if id == "" {
+				return mcp.NewToolResultError("id is required"), nil
+			}
+
+			input := types.MemoryUpdateInput{}
+
+			if v, ok := args["content"].(string); ok && v != "" {
+				input.Content = &v
+			}
+			if v, ok := args["type"].(string); ok && v != "" {
+				t := types.MemoryType(v)
+				input.Type = &t
+			}
+			if _, ok := args["tags"]; ok {
+				tags := extractStringSlice(args, "tags")
+				input.Tags = &tags
+			}
+			if _, ok := args["file_paths"]; ok {
+				fps := extractStringSlice(args, "file_paths")
+				input.FilePaths = &fps
+			}
+			if v, ok := args["confidence"].(float64); ok {
+				input.Confidence = &v
+			}
+
+			mem, err := k.Update(id, input)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if mem == nil {
+				return mcp.NewToolResultText(fmt.Sprintf("Memory %s not found", id)), nil
+			}
+			return mcp.NewToolResultText(
+				fmt.Sprintf("Updated memory %s (%s): %s", mem.ID, mem.Type, mem.Summary),
+			), nil
+		},
+	)
 }
 
 func extractStringSlice(args map[string]interface{}, key string) []string {

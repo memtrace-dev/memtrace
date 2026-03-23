@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/memtrace-dev/memtrace/internal/retrieval"
 	"github.com/memtrace-dev/memtrace/internal/types"
 )
 
@@ -240,6 +241,44 @@ func (s *MemoryStore) TouchAccess(id string, now time.Time) error {
 	return err
 }
 
+// StoreEmbedding persists a precomputed embedding vector for a memory.
+func (s *MemoryStore) StoreEmbedding(id string, vec []float64) error {
+	b, err := json.Marshal(vec)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("UPDATE memories SET embedding = ? WHERE id = ?", string(b), id)
+	return err
+}
+
+// FindEmbeddings returns the IDs and stored embeddings for all active memories in
+// the project that have a non-NULL embedding. Returns retrieval.EmbeddingRow so
+// MemoryStore satisfies the retrieval.StoreReader interface.
+func (s *MemoryStore) FindEmbeddings(projectID string) ([]retrieval.EmbeddingRow, error) {
+	rows, err := s.db.Query(`
+		SELECT id, embedding FROM memories
+		WHERE project_id = ? AND status = 'active' AND embedding IS NOT NULL
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []retrieval.EmbeddingRow
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			return nil, err
+		}
+		var vec []float64
+		if err := json.Unmarshal([]byte(raw), &vec); err != nil {
+			continue
+		}
+		result = append(result, retrieval.EmbeddingRow{ID: id, Embedding: vec})
+	}
+	return result, rows.Err()
+}
+
 // --- Helpers ---
 
 // scanner is the common interface for *sql.Row and *sql.Rows.
@@ -255,6 +294,7 @@ func scanMemory(s scanner) (*types.Memory, error) {
 		filePathsJSON, tagsJSON          string
 		createdStr, updatedStr           string
 		typeStr, sourceStr, statusStr    string
+		embedding                        sql.NullString // added by migration
 	)
 
 	err := s.Scan(
@@ -263,6 +303,7 @@ func scanMemory(s scanner) (*types.Memory, error) {
 		&m.ProjectID, &filePathsJSON, &tagsJSON,
 		&statusStr, &supersededBy,
 		&createdStr, &updatedStr, &accessedAt, &m.AccessCount,
+		&embedding,
 	)
 	if err != nil {
 		return nil, err
