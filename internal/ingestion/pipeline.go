@@ -26,11 +26,6 @@ type IngestResult struct {
 func (p *Pipeline) IngestOnInit(projectRoot string) *IngestResult {
 	result := &IngestResult{Sources: make(map[string]int)}
 
-	for source, memories := range map[string][]types.MemorySaveInput{} {
-		_ = source
-		_ = memories
-	}
-
 	importAndCount := func(source string, inputs []types.MemorySaveInput, err error) {
 		if err != nil || len(inputs) == 0 {
 			return
