@@ -333,6 +333,12 @@ go test ./...
 
 ---
 
+## Author
+
+Built by [Sebastian Puchet](https://github.com/SebastianPuchet) — [LinkedIn](https://www.linkedin.com/in/sebastianpuchet/)
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
