@@ -1,0 +1,467 @@
+package cli
+
+import (
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/memtrace-dev/memtrace/internal/kernel"
+	"github.com/memtrace-dev/memtrace/internal/types"
+	"github.com/memtrace-dev/memtrace/internal/util"
+)
+
+// setupProject creates a temp directory that looks like an initialized memtrace
+// project. It returns the project root and a kernel pre-populated with the
+// provided memories. The test's cwd is changed to the project root for the
+// duration of the test.
+func setupProject(t *testing.T, memories ...types.MemorySaveInput) (*kernel.MemoryKernel, string) {
+	t.Helper()
+
+	// Isolate ~/.config/memtrace to a temp home so we don't pollute the real one
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root := t.TempDir()
+
+	// Resolve symlinks so the key matches what os.Getwd() returns after chdir
+	// (on macOS /var/folders/... symlinks to /private/var/folders/...)
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = realRoot
+
+	// Create .memtrace directory
+	if err := os.MkdirAll(filepath.Join(root, ".memtrace"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Register the project in the config
+	projectID := util.GenerateID()
+	cfg := util.GetProjectConfig()
+	cfg.Projects[root] = util.ProjectEntry{
+		ID:        projectID,
+		Name:      filepath.Base(root),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := util.SaveProjectConfig(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	// Open kernel (creates the DB and applies schema)
+	dbPath := util.GetProjectDbPath(root)
+	k := kernel.New(dbPath, projectID)
+	if err := k.Open(); err != nil {
+		t.Fatalf("open kernel: %v", err)
+	}
+	t.Cleanup(func() { k.Close() })
+
+	for _, m := range memories {
+		if _, err := k.Save(m); err != nil {
+			t.Fatalf("pre-populate save: %v", err)
+		}
+	}
+
+	// Change cwd to the project root so openKernel() resolves correctly
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+
+	return k, root
+}
+
+// runCmd executes a root cobra command with the given args and returns stdout.
+// CLI commands use fmt.Printf directly so we redirect os.Stdout via a pipe.
+// These tests must not run in parallel (they share os.Stdout and os.Chdir).
+func runCmd(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	cmd := NewRootCmd()
+	cmd.SetArgs(args)
+	runErr := cmd.Execute()
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var sb strings.Builder
+	io.Copy(&sb, r)
+	r.Close()
+
+	return sb.String(), runErr
+}
+
+// --- save ---
+
+func TestSaveCmd_Basic(t *testing.T) {
+	setupProject(t)
+
+	out, err := runCmd(t, "save", "We use PostgreSQL as the primary database")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Saved memory") {
+		t.Errorf("expected confirmation, got: %s", out)
+	}
+}
+
+func TestSaveCmd_WithFlags(t *testing.T) {
+	_, _ = setupProject(t)
+
+	out, err := runCmd(t, "save", "Auth uses JWT RS256",
+		"--type", "decision",
+		"--tags", "auth,security",
+		"--files", "src/auth.go",
+		"--confidence", "0.9",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "decision") {
+		t.Errorf("expected type in output, got: %s", out)
+	}
+}
+
+func TestSaveCmd_NotInitialized(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Temp dir with no .memtrace/ and no .git/
+	bare := t.TempDir()
+	orig, _ := os.Getwd()
+	os.Chdir(bare)
+	t.Cleanup(func() { os.Chdir(orig) })
+
+	_, err := runCmd(t, "save", "something")
+	if err == nil {
+		t.Error("expected error when not initialized")
+	}
+}
+
+// --- search ---
+
+func TestSearchCmd_FindsResult(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "Redis is used for session caching", Tags: []string{"cache"}},
+	)
+
+	out, err := runCmd(t, "search", "Redis caching")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "Redis") {
+		t.Errorf("expected Redis in output, got: %s", out)
+	}
+}
+
+func TestSearchCmd_NoResults(t *testing.T) {
+	setupProject(t)
+
+	out, err := runCmd(t, "search", "quantum entanglement xyz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "No memories found") {
+		t.Errorf("expected no-results message, got: %s", out)
+	}
+}
+
+func TestSearchCmd_JSONOutput(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "We deploy to AWS us-east-1"},
+	)
+
+	out, err := runCmd(t, "search", "AWS", "--json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var results []interface{}
+	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(out)), &results); jsonErr != nil {
+		t.Errorf("expected valid JSON, got: %s\nerror: %v", out, jsonErr)
+	}
+}
+
+func TestSearchCmd_TypeFilter(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "Kubernetes deployment event", Type: types.MemoryTypeEvent},
+		types.MemorySaveInput{Content: "Kubernetes naming convention", Type: types.MemoryTypeConvention},
+	)
+
+	out, err := runCmd(t, "search", "Kubernetes", "--type", "convention")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(out, "deployment event") {
+		t.Errorf("type filter should exclude events, got: %s", out)
+	}
+	if !strings.Contains(out, "naming convention") {
+		t.Errorf("expected convention memory, got: %s", out)
+	}
+}
+
+// --- list ---
+
+func TestListCmd_Basic(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "memory one", Type: types.MemoryTypeDecision},
+		types.MemorySaveInput{Content: "memory two", Type: types.MemoryTypeFact},
+	)
+
+	out, err := runCmd(t, "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "memory one") || !strings.Contains(out, "memory two") {
+		t.Errorf("expected both memories in output, got: %s", out)
+	}
+}
+
+func TestListCmd_TypeFilter(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "a decision", Type: types.MemoryTypeDecision},
+		types.MemorySaveInput{Content: "a fact", Type: types.MemoryTypeFact},
+	)
+
+	out, err := runCmd(t, "list", "--type", "decision")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "a decision") {
+		t.Errorf("expected decision memory, got: %s", out)
+	}
+	if strings.Contains(out, "a fact") {
+		t.Errorf("type filter should exclude facts, got: %s", out)
+	}
+}
+
+func TestListCmd_Empty(t *testing.T) {
+	setupProject(t)
+
+	out, err := runCmd(t, "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "No memories found") {
+		t.Errorf("expected no-results message, got: %s", out)
+	}
+}
+
+func TestListCmd_JSONOutput(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "some memory"},
+	)
+
+	out, err := runCmd(t, "list", "--json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result interface{}
+	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); jsonErr != nil {
+		t.Errorf("expected valid JSON, got: %s\nerror: %v", out, jsonErr)
+	}
+}
+
+// --- rm ---
+
+func TestRmCmd_ByFullID(t *testing.T) {
+	k, _ := setupProject(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "to be deleted"})
+
+	out, err := runCmd(t, "rm", mem.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Deleted") {
+		t.Errorf("expected deletion confirmation, got: %s", out)
+	}
+
+	got, _ := k.Get(mem.ID)
+	if got != nil {
+		t.Error("memory should be deleted")
+	}
+}
+
+func TestRmCmd_ByPrefix(t *testing.T) {
+	k, _ := setupProject(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "prefix deletion test"})
+	prefix := mem.ID[:8]
+
+	out, err := runCmd(t, "rm", prefix)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Deleted") {
+		t.Errorf("expected deletion confirmation, got: %s", out)
+	}
+}
+
+func TestRmCmd_NotFound(t *testing.T) {
+	setupProject(t)
+
+	out, err := runCmd(t, "rm", "01NONEXISTENTID0000000000X")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "not found") {
+		t.Errorf("expected not-found message, got: %s", out)
+	}
+}
+
+// --- update ---
+
+func TestUpdateCmd_Content(t *testing.T) {
+	k, _ := setupProject(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "original content"})
+
+	out, err := runCmd(t, "update", mem.ID, "--content", "updated content")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Updated") {
+		t.Errorf("expected update confirmation, got: %s", out)
+	}
+
+	got, _ := k.Get(mem.ID)
+	if got.Content != "updated content" {
+		t.Errorf("want 'updated content', got %q", got.Content)
+	}
+}
+
+func TestUpdateCmd_Tags(t *testing.T) {
+	k, _ := setupProject(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "some memory", Tags: []string{"old"}})
+
+	_, err := runCmd(t, "update", mem.ID, "--tags", "new,tag")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, _ := k.Get(mem.ID)
+	if len(got.Tags) != 2 || got.Tags[0] != "new" {
+		t.Errorf("expected tags [new tag], got %v", got.Tags)
+	}
+}
+
+func TestUpdateCmd_NotFound(t *testing.T) {
+	setupProject(t)
+
+	out, err := runCmd(t, "update", "01NONEXISTENTID0000000000X", "--content", "x")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "not found") {
+		t.Errorf("expected not-found message, got: %s", out)
+	}
+}
+
+// --- export ---
+
+func TestExportCmd_Stdout(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "export test memory"},
+	)
+
+	out, err := runCmd(t, "export")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result interface{}
+	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); jsonErr != nil {
+		t.Errorf("expected valid JSON, got: %s\nerror: %v", out, jsonErr)
+	}
+}
+
+func TestExportCmd_ToFile(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "export to file test"},
+	)
+
+	outFile := filepath.Join(t.TempDir(), "memories.json")
+	out, err := runCmd(t, "export", "--output", outFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Exported") {
+		t.Errorf("expected export confirmation, got: %s", out)
+	}
+
+	data, readErr := os.ReadFile(outFile)
+	if readErr != nil {
+		t.Fatalf("output file not created: %v", readErr)
+	}
+	var result interface{}
+	if jsonErr := json.Unmarshal(data, &result); jsonErr != nil {
+		t.Errorf("invalid JSON in output file: %v", jsonErr)
+	}
+}
+
+func TestExportCmd_TypeFilter(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "decision memory", Type: types.MemoryTypeDecision},
+		types.MemorySaveInput{Content: "fact memory", Type: types.MemoryTypeFact},
+	)
+
+	out, err := runCmd(t, "export", "--type", "decision")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(out, "fact memory") {
+		t.Errorf("type filter should exclude facts, got: %s", out)
+	}
+	if !strings.Contains(out, "decision memory") {
+		t.Errorf("expected decision memory in export, got: %s", out)
+	}
+}
+
+// --- status ---
+
+func TestStatusCmd_Basic(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "d1", Type: types.MemoryTypeDecision},
+		types.MemorySaveInput{Content: "f1", Type: types.MemoryTypeFact},
+	)
+
+	out, err := runCmd(t, "status")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	// "Status:" line is printed via fmt.Printf (not color), so it lands in the buffer
+	if !strings.Contains(out, "Status:") {
+		t.Errorf("expected 'Status:' line in output, got: %s", out)
+	}
+}
+
+func TestStatusCmd_JSONOutput(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "some memory"},
+	)
+
+	out, err := runCmd(t, "status", "--json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	var result map[string]interface{}
+	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); jsonErr != nil {
+		t.Errorf("expected valid JSON, got: %s\nerror: %v", out, jsonErr)
+	}
+	if _, ok := result["total"]; !ok {
+		t.Error("expected 'total' field in JSON output")
+	}
+}
