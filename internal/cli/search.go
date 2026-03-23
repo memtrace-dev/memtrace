@@ -62,7 +62,12 @@ func newSearchCmd() *cobra.Command {
 
 func printMemoryRow(idx int, m *types.Memory, dim *color.Color) {
 	typeColor := typeColorFor(m.Type)
-	fmt.Printf("[%d] %s\n", idx, typeColor.Sprint(fmt.Sprintf("%s", m.Type)))
+	shortID := m.ID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+	fmt.Printf("[%d] %s  ", idx, typeColor.Sprint(fmt.Sprintf("%s", m.Type)))
+	dim.Printf("%s\n", shortID)
 	fmt.Printf("    %s\n", m.Content)
 	meta := []string{}
 	if len(m.Tags) > 0 {

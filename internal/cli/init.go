@@ -74,6 +74,9 @@ func newInitCmd() *cobra.Command {
 			// Add .memtrace/ to .gitignore
 			addToGitignore(projectRoot)
 
+			// Add memtrace instructions to CLAUDE.md (Claude Code only)
+			addToClaudeMd(projectRoot)
+
 			// Run importers unless --no-import
 			var result *ingestion.IngestResult
 			if !noImport {
@@ -99,6 +102,30 @@ func newInitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "Project name (default: directory name)")
 	cmd.Flags().BoolVar(&noImport, "no-import", false, "Skip auto-importing from Claude/Cursor/git")
 	return cmd
+}
+
+const claudeMdSnippet = `
+## memtrace (memory)
+
+This project uses the memtrace MCP server for persistent memory. When it is connected (mcp__memtrace__* tools are available):
+- Call memory_recall at the start of any non-trivial task
+- Call memory_save when you learn something worth remembering across sessions
+- Call memory_forget when the user asks to remove a memory — do not use built-in memory tools
+`
+
+// addToClaudeMd appends memtrace instructions to CLAUDE.md if not already present.
+func addToClaudeMd(projectRoot string) {
+	claudePath := filepath.Join(projectRoot, "CLAUDE.md")
+	data, _ := os.ReadFile(claudePath)
+	if strings.Contains(string(data), "memtrace") {
+		return
+	}
+	f, err := os.OpenFile(claudePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(claudeMdSnippet)
 }
 
 // addToGitignore appends .memtrace/ to .gitignore if the file exists and doesn't already contain it.

@@ -64,17 +64,22 @@ memtrace status
 
 ### Claude Code
 
-Add to `~/.claude/settings.json` (global) or `.claude/settings.json` (project-level):
+Register the server with the Claude CLI:
 
-```json
-{
-  "mcpServers": {
-    "memtrace": {
-      "command": "memtrace",
-      "args": ["serve"]
-    }
-  }
-}
+```bash
+# Project-scoped (recommended)
+claude mcp add memtrace memtrace serve
+
+# Or user-scoped (all projects)
+claude mcp add --scope user memtrace memtrace serve
+```
+
+`memtrace init` automatically adds instructions to `CLAUDE.md` so Claude uses the memtrace tools instead of its built-in memory. If you skipped init or want to add it manually:
+
+```markdown
+## memtrace (memory)
+This project uses the memtrace MCP server. When connected (mcp__memtrace__* tools available):
+call memory_recall at task start, memory_save for important facts, memory_forget to remove memories.
 ```
 
 ### Cursor

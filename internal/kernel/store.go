@@ -302,7 +302,7 @@ func scanMemory(s scanner) (*types.Memory, error) {
 func sanitizeFTSQuery(query string) string {
 	var b strings.Builder
 	for _, r := range query {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '_' || r == '-' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '_' {
 			b.WriteRune(r)
 		} else {
 			b.WriteRune(' ')
