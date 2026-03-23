@@ -158,10 +158,11 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel) {
 					return mcp.NewToolResultText("No matching memory found."), nil
 				}
 				m := results[0].Memory
-				archived := types.MemoryStatusArchived
-				k.Update(m.ID, types.MemoryUpdateInput{Status: &archived}) //nolint:errcheck
+				if _, err := k.Delete(m.ID); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
 				return mcp.NewToolResultText(
-					fmt.Sprintf("Archived memory %s: %s", m.ID, truncateStr(m.Content, 100)),
+					fmt.Sprintf("Deleted memory %s: %s", m.ID, truncateStr(m.Content, 100)),
 				), nil
 			}
 

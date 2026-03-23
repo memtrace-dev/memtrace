@@ -1,0 +1,104 @@
+package cli
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/memtrace-dev/memtrace/internal/types"
+	"github.com/spf13/cobra"
+)
+
+func newUpdateCmd() *cobra.Command {
+	var memType string
+	var tags string
+	var files string
+	var content string
+	var confidence float64
+
+	cmd := &cobra.Command{
+		Use:   "update <id|prefix>",
+		Short: "Update an existing memory",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			k, _, err := openKernel()
+			if err != nil {
+				return err
+			}
+			defer k.Close()
+
+			id := args[0]
+
+			// Resolve short prefix to full ID if needed
+			if len(id) < 26 {
+				all, err := k.List(types.ListOptions{Limit: 1000, Status: "active"})
+				if err != nil {
+					return err
+				}
+				var matches []string
+				for _, m := range all {
+					if strings.HasPrefix(m.ID, strings.ToUpper(id)) {
+						matches = append(matches, m.ID)
+					}
+				}
+				if len(matches) == 0 {
+					fmt.Printf("Memory %s not found\n", id)
+					return nil
+				}
+				if len(matches) > 1 {
+					fmt.Printf("Ambiguous prefix %q — use more characters\n", id)
+					return nil
+				}
+				id = matches[0]
+			}
+
+			input := types.MemoryUpdateInput{}
+
+			if cmd.Flags().Changed("content") {
+				input.Content = &content
+			}
+			if cmd.Flags().Changed("type") {
+				t := types.MemoryType(memType)
+				input.Type = &t
+			}
+			if cmd.Flags().Changed("tags") {
+				var parsed []string
+				for _, t := range strings.Split(tags, ",") {
+					if t = strings.TrimSpace(t); t != "" {
+						parsed = append(parsed, t)
+					}
+				}
+				input.Tags = &parsed
+			}
+			if cmd.Flags().Changed("files") {
+				var parsed []string
+				for _, f := range strings.Split(files, ",") {
+					if f = strings.TrimSpace(f); f != "" {
+						parsed = append(parsed, f)
+					}
+				}
+				input.FilePaths = &parsed
+			}
+			if cmd.Flags().Changed("confidence") {
+				input.Confidence = &confidence
+			}
+
+			mem, err := k.Update(id, input)
+			if err != nil {
+				return err
+			}
+			if mem == nil {
+				fmt.Printf("Memory %s not found\n", id)
+				return nil
+			}
+			fmt.Printf("Updated %s (%s): %s\n", mem.ID, mem.Type, mem.Summary)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&content, "content", "", "New content")
+	cmd.Flags().StringVar(&memType, "type", "", "New type: decision, convention, fact, event")
+	cmd.Flags().StringVar(&tags, "tags", "", "New comma-separated tags (replaces existing)")
+	cmd.Flags().StringVar(&files, "files", "", "New comma-separated file paths (replaces existing)")
+	cmd.Flags().Float64Var(&confidence, "confidence", 0, "New confidence score 0.0-1.0")
+	return cmd
+}
