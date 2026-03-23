@@ -212,17 +212,74 @@ memtrace status  [--json]
 
 ## Semantic search
 
-When an embedding API is configured, `memory_recall` and `memtrace search` switch to hybrid BM25 + semantic (cosine similarity) scoring — giving better results for paraphrased or conceptually related queries.
+When an embedding API is configured, `memory_recall` and `memtrace search` switch to hybrid BM25 + semantic (cosine similarity) scoring — giving better results for paraphrased or conceptually related queries. Without configuration, memtrace falls back to BM25-only search.
 
-Set these environment variables (any OpenAI-compatible endpoint works, including Ollama):
+Any OpenAI-compatible endpoint works, including Ollama running locally.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MEMTRACE_EMBED_KEY` | — | API key. Falls back to `OPENAI_API_KEY`. **Required** to enable. |
+| `MEMTRACE_EMBED_URL` | `https://api.openai.com/v1` | Base URL of the embeddings API. |
+| `MEMTRACE_EMBED_MODEL` | `text-embedding-3-small` | Model name. |
+
+Because `memtrace serve` is launched by your MCP client, the variables must be in the MCP server configuration — not just your shell profile.
+
+### Claude Code
+
+Pass env vars with `--env` when registering the server:
 
 ```bash
-MEMTRACE_EMBED_KEY=sk-...          # API key (or OPENAI_API_KEY)
-MEMTRACE_EMBED_URL=https://api.openai.com/v1   # optional, default shown
-MEMTRACE_EMBED_MODEL=text-embedding-3-small    # optional, default shown
+claude mcp add memtrace \
+  --env MEMTRACE_EMBED_KEY=sk-... \
+  --env MEMTRACE_EMBED_MODEL=text-embedding-3-small \
+  memtrace serve
 ```
 
-Without these variables, memtrace falls back to BM25-only search.
+Or edit `.claude/mcp.json` directly:
+
+```json
+{
+  "mcpServers": {
+    "memtrace": {
+      "command": "memtrace",
+      "args": ["serve"],
+      "env": {
+        "MEMTRACE_EMBED_KEY": "sk-...",
+        "MEMTRACE_EMBED_MODEL": "text-embedding-3-small"
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+Add an `env` block to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "memtrace": {
+      "command": "memtrace",
+      "args": ["serve"],
+      "env": {
+        "MEMTRACE_EMBED_KEY": "sk-...",
+        "MEMTRACE_EMBED_MODEL": "text-embedding-3-small"
+      }
+    }
+  }
+}
+```
+
+### Local Ollama
+
+```json
+"env": {
+  "MEMTRACE_EMBED_KEY": "ollama",
+  "MEMTRACE_EMBED_URL": "http://localhost:11434/v1",
+  "MEMTRACE_EMBED_MODEL": "nomic-embed-text"
+}
+```
 
 ---
 
