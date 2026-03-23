@@ -146,11 +146,11 @@ memory_recall(
 
 ### `memory_forget`
 
-Delete or archive a memory.
+Delete a memory by ID or by query.
 
 ```
 memory_forget(id: "01KMDX71NT...")    // delete by ID
-memory_forget(query: "old approach")  // archive top match
+memory_forget(query: "old approach")  // delete top match
 ```
 
 ---
@@ -182,7 +182,7 @@ Skip with `--no-import` if you want a clean start.
 
 ```
 memtrace init [--name <name>] [--no-import]
-memtrace save <content> [--type decision|convention|fact|event] [--tags auth,api] [--files src/auth.go]
+memtrace save <content> [--type decision|convention|fact|event] [--tags auth,api] [--files src/auth.go] [--confidence 0.9]
 memtrace update <id|prefix> [--content "..."] [--type ...] [--tags ...] [--files ...] [--confidence 0.9]
 memtrace search <query> [--limit 10] [--type decision] [--json]
 memtrace list [--limit 20] [--type convention] [--status active] [--json]
@@ -197,6 +197,18 @@ memtrace status [--json]
 ## Storage
 
 All data lives in `.memtrace/memtrace.db` inside your project — SQLite, local-only, no account, no cloud. The `.memtrace/` directory is added to `.gitignore` automatically on init.
+
+---
+
+## Development
+
+```bash
+# Build
+make install
+
+# Test
+go test ./...
+```
 
 ---
 
