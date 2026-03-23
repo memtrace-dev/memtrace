@@ -1,23 +1,42 @@
 # memtrace
 
-Local-first memory engine for AI coding agents.
+Persistent memory for AI coding agents — local, structured, zero-config.
 
-Memtrace gives tools like Claude Code, Cursor, and any MCP-compatible agent persistent, structured memory across sessions — decisions, conventions, and codebase knowledge that survives every new chat.
+Memtrace gives Claude Code, Cursor, and any MCP-compatible agent a memory that survives every new session. Architectural decisions, project conventions, and codebase knowledge — all there the next time you open a chat.
 
 ---
 
 ## The problem
 
-Every AI coding session starts from zero. You've told your agent your conventions, your architectural decisions, why you chose PostgreSQL over MySQL — and it's gone the next day. Memtrace fixes that.
+Every AI coding session starts from zero. You've explained your conventions. You've told it why you chose PostgreSQL, how your auth works, what patterns to follow. Tomorrow it's gone.
+
+Copy-pasting context into every chat doesn't scale. `CLAUDE.md` helps, but it's static. Memtrace gives your agent a living, searchable memory it builds over time.
+
+---
 
 ## How it works
 
-Memtrace runs as a local MCP server backed by a SQLite database inside your project. When your agent saves a memory (a decision, a convention, a fact), it's there the next session — and in every other tool you use.
+Memtrace runs as a local MCP server backed by SQLite inside your project. Your agent calls three tools:
 
 ```
-Agent → memory_save("We use JWT with RS256 for auth")
-Agent → memory_recall("authentication")  → returns the JWT decision
+Session 1
+  agent → memory_save("We use JWT with RS256. Stateless API, no session storage.")
+  agent → memory_save("Auth middleware is in src/middleware/auth.go")
+
+Session 2 (new chat, blank context)
+  agent → memory_recall("auth")
+  ← "We use JWT with RS256. Stateless API, no session storage."
+  ← "Auth middleware is in src/middleware/auth.go"
 ```
+
+On `memtrace init`, it auto-imports your existing Claude Code memories, Cursor rules, and relevant git history — so memory starts populated, not empty.
+
+---
+
+## Requirements
+
+- Go 1.22+
+- Git (optional, used for history import on init)
 
 ---
 
@@ -32,7 +51,6 @@ Or build from source:
 ```bash
 git clone https://github.com/memtrace-dev/memtrace
 cd memtrace
-make build
 make install
 ```
 
@@ -41,22 +59,17 @@ make install
 ## Quickstart
 
 ```bash
-# Initialize memtrace in your project
+# 1. Initialize in your project
 cd your-project
 memtrace init
 
-# Save a memory manually
-memtrace save "We use PostgreSQL as the primary database" --type decision --tags "database"
+# 2. Wire up the MCP server (Claude Code)
+claude mcp add memtrace memtrace serve
 
-# Search memories
-memtrace search "database"
-
-# List all memories
-memtrace list
-
-# Project status
-memtrace status
+# 3. Start a new Claude Code session — memory is live
 ```
+
+That's it. Your agent now has `memory_save`, `memory_recall`, and `memory_forget` available in every session.
 
 ---
 
@@ -64,23 +77,15 @@ memtrace status
 
 ### Claude Code
 
-Register the server with the Claude CLI:
-
 ```bash
-# Project-scoped (recommended)
+# Project-scoped (recommended — one setup per project)
 claude mcp add memtrace memtrace serve
 
-# Or user-scoped (all projects)
+# User-scoped (available in all projects that have been initialized)
 claude mcp add --scope user memtrace memtrace serve
 ```
 
-`memtrace init` automatically adds instructions to `CLAUDE.md` so Claude uses the memtrace tools instead of its built-in memory. If you skipped init or want to add it manually:
-
-```markdown
-## memtrace (memory)
-This project uses the memtrace MCP server. When connected (mcp__memtrace__* tools available):
-call memory_recall at task start, memory_save for important facts, memory_forget to remove memories.
-```
+`memtrace init` automatically adds instructions to `CLAUDE.md` so Claude routes memory operations to memtrace instead of its built-in memory tools.
 
 ### Cursor
 
@@ -97,7 +102,7 @@ Add to `.cursor/mcp.json` in your project:
 }
 ```
 
-### Any MCP-compatible agent
+### Other MCP clients
 
 ```json
 {
@@ -114,30 +119,28 @@ Add to `.cursor/mcp.json` in your project:
 
 ## MCP Tools
 
-Once configured, your agent has access to three tools:
-
 ### `memory_save`
 
-Save a memory that should persist across sessions.
+Save something worth remembering across sessions.
 
 ```
 memory_save(
-  content: "We chose JWT over session tokens for the auth service",
-  type: "decision",          // decision | convention | fact | event
-  tags: ["auth", "security"],
+  content:    "We use JWT with RS256 — stateless API, no session storage",
+  type:       "decision",           // decision | convention | fact | event
+  tags:       ["auth", "security"],
   file_paths: ["src/middleware/auth.go"]
 )
 ```
 
 ### `memory_recall`
 
-Search for relevant memories.
+Search memories by natural language query.
 
 ```
 memory_recall(
   query: "authentication approach",
   limit: 10,
-  type: "decision"   // optional filter
+  type:  "decision"   // optional filter
 )
 ```
 
@@ -154,12 +157,24 @@ memory_forget(query: "old approach")  // archive top match
 
 ## Memory types
 
-| Type | When to use |
-|------|-------------|
-| `decision` | A choice made — architecture, tooling, approach |
-| `convention` | A project standard — naming, structure, style |
-| `fact` | A durable truth about the codebase |
-| `event` | Something that happened — migration, incident, refactor |
+| Type | Use for |
+|------|---------|
+| `decision` | Architecture choices, tooling selections, approach rationale |
+| `convention` | Naming rules, code style, structural standards |
+| `fact` | Durable truths about the codebase |
+| `event` | Migrations, incidents, major refactors |
+
+---
+
+## What gets imported on `init`
+
+`memtrace init` auto-imports from three sources:
+
+- **Claude Code memories** — `~/.claude/projects/<project>/memory/*.md`
+- **Cursor rules** — `.cursorrules` in your project root, split into per-convention memories
+- **Git history** — recent commits containing decisions, migrations, or refactor keywords
+
+Skip with `--no-import` if you want a clean start.
 
 ---
 
@@ -167,33 +182,19 @@ memory_forget(query: "old approach")  // archive top match
 
 ```
 memtrace init [--name <name>] [--no-import]
-memtrace save <content> [--type decision|convention|fact|event] [--tags auth,api] [--files src/auth.go] [--confidence 0.9]
+memtrace save <content> [--type decision|convention|fact|event] [--tags auth,api] [--files src/auth.go]
 memtrace search <query> [--limit 10] [--type decision] [--json]
 memtrace list [--limit 20] [--type convention] [--status active] [--json]
-memtrace rm <id>
-memtrace serve
+memtrace rm <id|prefix>
+memtrace serve [--dir <path>]
 memtrace status [--json]
 ```
 
 ---
 
-## What gets imported on `init`
-
-By default, `memtrace init` auto-imports:
-
-- **Claude Code memories** — from `~/.claude/projects/<project>/memory/`
-- **Cursor rules** — from `.cursorrules` in your project root
-- **Git history** — recent commits containing decisions, migrations, refactors
-
-Skip with `--no-import`.
-
----
-
 ## Storage
 
-All data lives in `.memtrace/memtrace.db` inside your project directory. SQLite, local, no cloud, no account required.
-
-The `.memtrace/` directory is automatically added to `.gitignore` on init.
+All data lives in `.memtrace/memtrace.db` inside your project — SQLite, local-only, no account, no cloud. The `.memtrace/` directory is added to `.gitignore` automatically on init.
 
 ---
 
