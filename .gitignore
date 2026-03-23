@@ -1,0 +1,7 @@
+bin/
+.memtrace/
+*.db
+*.db-wal
+*.db-shm
+.idea/
+.DS_Store
