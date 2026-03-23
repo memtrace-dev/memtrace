@@ -36,25 +36,33 @@ type Client struct {
 // NewClientFromEnv creates a Client from environment variables.
 // Returns nil if no API key is configured — callers treat nil as "embeddings disabled".
 func NewClientFromEnv() *Client {
-	apiKey := os.Getenv("MEMTRACE_EMBED_KEY")
+	return NewClient(
+		os.Getenv("MEMTRACE_EMBED_KEY"),
+		os.Getenv("OPENAI_API_KEY"),
+		os.Getenv("MEMTRACE_EMBED_URL"),
+		os.Getenv("MEMTRACE_EMBED_MODEL"),
+	)
+}
+
+// NewClient creates a Client from explicit values. envKey and envFallbackKey are
+// tried in order; the first non-empty value is used as the API key.
+// Callers that merge config-file values with env vars should prefer this over NewClientFromEnv.
+// Returns nil if no API key is resolved — callers treat nil as "embeddings disabled".
+func NewClient(key, fallbackKey, baseURL, model string) *Client {
+	apiKey := key
 	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
+		apiKey = fallbackKey
 	}
 	if apiKey == "" {
 		return nil
 	}
-
-	baseURL := os.Getenv("MEMTRACE_EMBED_URL")
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
-
-	model := os.Getenv("MEMTRACE_EMBED_MODEL")
 	if model == "" {
 		model = "text-embedding-3-small"
 	}
-
 	return &Client{
 		baseURL: baseURL,
 		model:   model,

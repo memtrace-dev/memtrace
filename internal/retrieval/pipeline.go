@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"math"
 	"sort"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 type StoreReader interface {
 	SearchFTS(query string, projectID string, limit int) ([]types.FTSResult, error)
 	FindByRowID(rowid int64) (*types.Memory, error)
+	FindByID(id string) (*types.Memory, error)
 	FindEmbeddings(projectID string) ([]EmbeddingRow, error)
 }
 
@@ -51,8 +53,14 @@ func (p *Pipeline) Recall(input types.MemoryRecallInput) ([]types.ScoredMemory, 
 	if err != nil {
 		return nil, err
 	}
+
+	// When FTS finds nothing but an embedder is configured, fall back to pure
+	// semantic search so conceptually related queries still find results.
 	if len(ftsResults) == 0 {
-		return nil, nil
+		if p.embedder == nil {
+			return nil, nil
+		}
+		return p.semanticOnlySearch(input)
 	}
 
 	// Resolve each FTS row to a full memory and apply hard filters.
@@ -121,6 +129,73 @@ func (p *Pipeline) computeSemanticScores(query string, candidates []candidate) m
 		scores[row.ID] = embedding.CosineSimilarity(queryVec, row.Embedding)
 	}
 	return scores
+}
+
+// semanticOnlySearch is used when FTS returns no candidates. It embeds the query,
+// scores all stored embeddings by cosine similarity, applies hard filters, and
+// returns the top results. Used as a fallback for conceptual/paraphrased queries.
+func (p *Pipeline) semanticOnlySearch(input types.MemoryRecallInput) ([]types.ScoredMemory, error) {
+	queryVec, err := p.embedder.Embed(input.Query)
+	if err != nil || len(queryVec) == 0 {
+		return nil, nil
+	}
+
+	rows, err := p.store.FindEmbeddings(p.projectID)
+	if err != nil || len(rows) == 0 {
+		return nil, nil
+	}
+
+	type scoredRow struct {
+		id  string
+		sim float64
+	}
+	ranked := make([]scoredRow, 0, len(rows))
+	for _, row := range rows {
+		sim := embedding.CosineSimilarity(queryVec, row.Embedding)
+		if sim > 0 {
+			ranked = append(ranked, scoredRow{row.ID, sim})
+		}
+	}
+	sort.Slice(ranked, func(i, j int) bool { return ranked[i].sim > ranked[j].sim })
+
+	results := make([]types.ScoredMemory, 0, input.Limit)
+	for _, r := range ranked {
+		if len(results) >= input.Limit {
+			break
+		}
+		mem, err := p.store.FindByID(r.id)
+		if err != nil || mem == nil {
+			continue
+		}
+		if mem.Status != input.Status {
+			continue
+		}
+		if input.Type != "" && mem.Type != input.Type {
+			continue
+		}
+		if input.MinConfidence > 0 && mem.Confidence < input.MinConfidence {
+			continue
+		}
+		if len(input.Tags) > 0 && !hasAllTags(mem.Tags, input.Tags) {
+			continue
+		}
+		ageMs := float64(time.Now().Sub(mem.CreatedAt).Milliseconds())
+		recency := math.Pow(0.5, ageMs/recencyHalfLifeMs)
+		accessFreq := math.Min(1.0, math.Log2(float64(mem.AccessCount)+1)/10.0)
+		score := weightSemantic*r.sim + weightRecency*recency +
+			weightConfidence*mem.Confidence + weightAccess*accessFreq
+		results = append(results, types.ScoredMemory{
+			Memory: *mem,
+			Score:  score,
+			ScoreBreakdown: types.ScoreBreakdown{
+				TextRelevance:   r.sim,
+				Recency:         recency,
+				Confidence:      mem.Confidence,
+				AccessFrequency: accessFreq,
+			},
+		})
+	}
+	return results, nil
 }
 
 func hasAllTags(memTags, required []string) bool {

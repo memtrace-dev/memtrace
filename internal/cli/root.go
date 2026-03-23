@@ -22,6 +22,8 @@ func NewRootCmd() *cobra.Command {
 		newImportCmd(),
 		newServeCmd(),
 		newStatusCmd(),
+		newReindexCmd(),
+		newConfigCmd(),
 	)
 
 	return root

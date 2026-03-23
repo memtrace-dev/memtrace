@@ -1,6 +1,9 @@
 package kernel
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
@@ -218,6 +221,108 @@ func TestKernel_Recall_UpdatesAccessCount(t *testing.T) {
 	got, _ := k.Get(saved.ID)
 	if got.AccessCount == 0 {
 		t.Error("expected access_count > 0 after recall")
+	}
+}
+
+func TestKernel_HasEmbedder_False(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("MEMTRACE_EMBED_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	k := setupTestKernel(t)
+	if k.HasEmbedder() {
+		t.Error("expected HasEmbedder=false when no key is set")
+	}
+}
+
+func TestKernel_HasEmbedder_True(t *testing.T) {
+	t.Setenv("MEMTRACE_EMBED_KEY", "test-key")
+	k := setupTestKernel(t)
+	if !k.HasEmbedder() {
+		t.Error("expected HasEmbedder=true when key is set")
+	}
+}
+
+func TestKernel_Reindex_NoEmbedder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("MEMTRACE_EMBED_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	k := setupTestKernel(t)
+	k.Save(types.MemorySaveInput{Content: "no embedder memory"})
+
+	res, err := k.Reindex(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Succeeded != 0 {
+		t.Errorf("want 0 when no embedder, got %d", res.Succeeded)
+	}
+}
+
+// fakeEmbedServer returns an httptest.Server that always responds with a
+// fixed 3-dimensional embedding vector.
+func fakeEmbedServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type resp struct {
+			Data []struct {
+				Embedding []float64 `json:"embedding"`
+			} `json:"data"`
+		}
+		json.NewEncoder(w).Encode(resp{Data: []struct {
+			Embedding []float64 `json:"embedding"`
+		}{{Embedding: []float64{0.1, 0.2, 0.3}}}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestKernel_Reindex_WithEmbedder(t *testing.T) {
+	srv := fakeEmbedServer(t)
+	t.Setenv("MEMTRACE_EMBED_KEY", "test-key")
+	t.Setenv("MEMTRACE_EMBED_URL", srv.URL)
+
+	k := setupTestKernel(t)
+
+	// Insert memories directly via the store to avoid the async embedding
+	// goroutine that Save() spawns — guarantees embedding IS NULL.
+	k.store.Insert(makeMemory("01REINDX01", "test-project", types.MemoryTypeFact))
+	k.store.Insert(makeMemory("01REINDX02", "test-project", types.MemoryTypeFact))
+
+	res, err := k.Reindex(nil)
+	if err != nil {
+		t.Fatalf("reindex error: %v", err)
+	}
+	if res.Succeeded != 2 {
+		t.Errorf("want 2 reindexed, got %d (firstErr: %v)", res.Succeeded, res.FirstErr)
+	}
+
+	rows, err := k.store.FindEmbeddings("test-project")
+	if err != nil {
+		t.Fatalf("find embeddings: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Errorf("want 2 stored embeddings, got %d", len(rows))
+	}
+}
+
+func TestKernel_Reindex_SkipsAlreadyEmbedded(t *testing.T) {
+	srv := fakeEmbedServer(t)
+	t.Setenv("MEMTRACE_EMBED_KEY", "test-key")
+	t.Setenv("MEMTRACE_EMBED_URL", srv.URL)
+
+	k := setupTestKernel(t)
+	m := makeMemory("01RESKIP01", "test-project", types.MemoryTypeFact)
+	k.store.Insert(m)
+	k.store.StoreEmbedding(m.ID, []float64{9, 9, 9})
+
+	res, err := k.Reindex(nil)
+	if err != nil {
+		t.Fatalf("reindex error: %v", err)
+	}
+	if res.Succeeded != 0 {
+		t.Errorf("want 0 (already embedded), got %d", res.Succeeded)
 	}
 }
 

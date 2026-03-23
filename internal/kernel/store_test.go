@@ -224,6 +224,80 @@ func TestStore_SearchFTS_NoResults(t *testing.T) {
 	}
 }
 
+func TestStore_FindUnembedded(t *testing.T) {
+	store := NewStore(setupTestDB(t))
+
+	m1 := makeMemory("01EMBED001", "proj1", types.MemoryTypeFact)
+	m2 := makeMemory("01EMBED002", "proj1", types.MemoryTypeFact)
+	m3 := makeMemory("01EMBED003", "proj2", types.MemoryTypeFact) // different project
+	store.Insert(m1)
+	store.Insert(m2)
+	store.Insert(m3)
+
+	// Give m1 an embedding — it should not appear in FindUnembedded.
+	if err := store.StoreEmbedding(m1.ID, []float64{0.1, 0.2}); err != nil {
+		t.Fatalf("store embedding: %v", err)
+	}
+
+	rows, err := store.FindUnembedded("proj1")
+	if err != nil {
+		t.Fatalf("find unembedded: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 unembedded row for proj1, got %d", len(rows))
+	}
+	if rows[0].ID != m2.ID {
+		t.Errorf("want m2, got %s", rows[0].ID)
+	}
+	if rows[0].Content != m2.Content {
+		t.Errorf("content mismatch")
+	}
+}
+
+func TestStore_StoreEmbedding_FindEmbeddings(t *testing.T) {
+	store := NewStore(setupTestDB(t))
+
+	m := makeMemory("01EMBRD01", "proj1", types.MemoryTypeFact)
+	store.Insert(m)
+
+	vec := []float64{0.1, 0.5, 0.9}
+	if err := store.StoreEmbedding(m.ID, vec); err != nil {
+		t.Fatalf("store embedding: %v", err)
+	}
+
+	rows, err := store.FindEmbeddings("proj1")
+	if err != nil {
+		t.Fatalf("find embeddings: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 row, got %d", len(rows))
+	}
+	if rows[0].ID != m.ID {
+		t.Errorf("ID: want %s, got %s", m.ID, rows[0].ID)
+	}
+	if len(rows[0].Embedding) != 3 || rows[0].Embedding[1] != 0.5 {
+		t.Errorf("unexpected embedding: %v", rows[0].Embedding)
+	}
+}
+
+func TestStore_FindEmbeddings_SkipsNullAndOtherProjects(t *testing.T) {
+	store := NewStore(setupTestDB(t))
+
+	m1 := makeMemory("01SKIP001", "proj1", types.MemoryTypeFact)
+	m2 := makeMemory("01SKIP002", "proj2", types.MemoryTypeFact) // different project
+	store.Insert(m1)
+	store.Insert(m2)
+	store.StoreEmbedding(m2.ID, []float64{1, 2, 3})
+
+	rows, err := store.FindEmbeddings("proj1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("want 0 rows for proj1, got %d", len(rows))
+	}
+}
+
 func TestStore_TouchAccess(t *testing.T) {
 	store := NewStore(setupTestDB(t))
 	m := makeMemory("01TOUCH01", "proj1", types.MemoryTypeFact)

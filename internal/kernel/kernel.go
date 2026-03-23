@@ -3,6 +3,7 @@ package kernel
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/memtrace-dev/memtrace/internal/embedding"
@@ -46,8 +47,14 @@ func (k *MemoryKernel) Open() error {
 	k.store = NewStore(db)
 	k.pipeline = retrieval.New(k.store, k.projectID) // MemoryStore satisfies retrieval.StoreReader
 
-	// Wire up optional embedder from environment variables.
-	if e := embedding.NewClientFromEnv(); e != nil {
+	// Wire up optional embedder. Env vars take precedence; config file is the fallback.
+	cfg := util.GetProjectConfig()
+	if e := embedding.NewClient(
+		firstNonEmpty(os.Getenv("MEMTRACE_EMBED_KEY"), os.Getenv("OPENAI_API_KEY"), cfg.Embed.Key),
+		"",
+		firstNonEmpty(os.Getenv("MEMTRACE_EMBED_URL"), cfg.Embed.URL),
+		firstNonEmpty(os.Getenv("MEMTRACE_EMBED_MODEL"), cfg.Embed.Model),
+	); e != nil {
 		k.embedder = e
 		k.pipeline.WithEmbedder(e)
 	}
@@ -172,9 +179,66 @@ func (k *MemoryKernel) Recall(input types.MemoryRecallInput) ([]types.ScoredMemo
 	return results, nil
 }
 
+// HasEmbedder reports whether an embedding client is configured.
+func (k *MemoryKernel) HasEmbedder() bool {
+	return k.embedder != nil
+}
+
+// ReindexResult holds the outcome of a Reindex run.
+type ReindexResult struct {
+	Total     int   // memories with no stored embedding
+	Succeeded int   // successfully embedded and stored
+	FirstErr  error // first embed/store error encountered, if any
+}
+
+// Reindex computes and persists embeddings for all active memories that have
+// none stored yet. If no embedder is configured it returns a zero result.
+func (k *MemoryKernel) Reindex(progress func(done, total int)) (ReindexResult, error) {
+	if k.embedder == nil {
+		return ReindexResult{}, nil
+	}
+
+	rows, err := k.store.FindUnembedded(k.projectID)
+	if err != nil {
+		return ReindexResult{}, fmt.Errorf("listing unembedded memories: %w", err)
+	}
+
+	res := ReindexResult{Total: len(rows)}
+	for _, row := range rows {
+		vec, err := k.embedder.Embed(row.Content)
+		if err != nil {
+			if res.FirstErr == nil {
+				res.FirstErr = fmt.Errorf("embed %s: %w", row.ID[:8], err)
+			}
+			continue
+		}
+		if storeErr := k.store.StoreEmbedding(row.ID, vec); storeErr != nil {
+			if res.FirstErr == nil {
+				res.FirstErr = fmt.Errorf("store %s: %w", row.ID[:8], storeErr)
+			}
+			continue
+		}
+		res.Succeeded++
+		if progress != nil {
+			progress(res.Succeeded, res.Total)
+		}
+	}
+	return res, nil
+}
+
 // Store returns the underlying store (used by the retrieval pipeline).
 func (k *MemoryKernel) Store() *MemoryStore {
 	return k.store
+}
+
+// firstNonEmpty returns the first non-empty string from the arguments.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func truncate(s string, maxLen int) string {

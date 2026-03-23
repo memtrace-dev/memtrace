@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -602,5 +604,133 @@ func TestStatusCmd_JSONOutput(t *testing.T) {
 	}
 	if _, ok := result["total"]; !ok {
 		t.Error("expected 'total' field in JSON output")
+	}
+}
+
+// --- config ---
+
+func TestConfigSetCmd_EmbedKey(t *testing.T) {
+	setupProject(t)
+
+	out, err := runCmd(t, "config", "set", "embed.key", "sk-test-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "embed.key") {
+		t.Errorf("expected confirmation, got: %s", out)
+	}
+
+	cfg := util.GetProjectConfig()
+	if cfg.Embed.Key != "sk-test-123" {
+		t.Errorf("want sk-test-123, got %q", cfg.Embed.Key)
+	}
+}
+
+func TestConfigSetCmd_EmbedModel(t *testing.T) {
+	setupProject(t)
+	_, err := runCmd(t, "config", "set", "embed.model", "nomic-embed-text")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if util.GetProjectConfig().Embed.Model != "nomic-embed-text" {
+		t.Errorf("model not persisted")
+	}
+}
+
+func TestConfigSetCmd_EmbedURL(t *testing.T) {
+	setupProject(t)
+	_, err := runCmd(t, "config", "set", "embed.url", "http://localhost:11434/v1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if util.GetProjectConfig().Embed.URL != "http://localhost:11434/v1" {
+		t.Errorf("url not persisted")
+	}
+}
+
+func TestConfigSetCmd_InvalidKey(t *testing.T) {
+	setupProject(t)
+	_, err := runCmd(t, "config", "set", "unknown.key", "value")
+	if err == nil {
+		t.Error("expected error for unknown key")
+	}
+}
+
+func TestConfigUnsetCmd(t *testing.T) {
+	setupProject(t)
+	runCmd(t, "config", "set", "embed.key", "to-be-removed")
+	_, err := runCmd(t, "config", "unset", "embed.key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if util.GetProjectConfig().Embed.Key != "" {
+		t.Error("expected embed.key to be cleared")
+	}
+}
+
+func TestConfigGetCmd(t *testing.T) {
+	setupProject(t)
+	runCmd(t, "config", "set", "embed.key", "sk-show-me")
+	runCmd(t, "config", "set", "embed.model", "ada-002")
+
+	out, err := runCmd(t, "config", "get")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "embed.key") {
+		t.Errorf("expected embed.key in output, got: %s", out)
+	}
+	if !strings.Contains(out, "embed.model") {
+		t.Errorf("expected embed.model in output, got: %s", out)
+	}
+}
+
+// --- reindex ---
+
+func TestReindexCmd_NoEmbedder(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "memory without embedder"},
+	)
+	t.Setenv("MEMTRACE_EMBED_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	// Output goes to stderr for the "no embedder" message; runCmd captures stdout.
+	// We just verify the command exits without error and stdout is empty/benign.
+	out, err := runCmd(t, "reindex")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+}
+
+func TestReindexCmd_WithEmbedder(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type resp struct {
+			Data []struct {
+				Embedding []float64 `json:"embedding"`
+			} `json:"data"`
+		}
+		json.NewEncoder(w).Encode(resp{Data: []struct {
+			Embedding []float64 `json:"embedding"`
+		}{{Embedding: []float64{0.1, 0.2, 0.3}}}})
+	}))
+	defer srv.Close()
+
+	// Save memories *before* setting the embed key so the kernel opens without
+	// an embedder and memories are stored with embedding = NULL.
+	setupProject(t,
+		types.MemorySaveInput{Content: "needs embedding one"},
+		types.MemorySaveInput{Content: "needs embedding two"},
+	)
+
+	// Enable the embedder for the reindex run.
+	t.Setenv("MEMTRACE_EMBED_KEY", "test-key")
+	t.Setenv("MEMTRACE_EMBED_URL", srv.URL)
+
+	out, err := runCmd(t, "reindex")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Reindexed") {
+		t.Errorf("expected 'Reindexed' in output, got: %s", out)
 	}
 }

@@ -56,6 +56,55 @@ func TestCosineSimilarity_ZeroVector(t *testing.T) {
 	}
 }
 
+// --- NewClient ---
+
+func TestNewClient_KeyTakesPrecedence(t *testing.T) {
+	c := NewClient("primary-key", "fallback-key", "", "")
+	if c == nil {
+		t.Fatal("expected non-nil client")
+	}
+	if c.apiKey != "primary-key" {
+		t.Errorf("want primary-key, got %s", c.apiKey)
+	}
+}
+
+func TestNewClient_FallbackKey(t *testing.T) {
+	c := NewClient("", "fallback-key", "", "")
+	if c == nil {
+		t.Fatal("expected non-nil client")
+	}
+	if c.apiKey != "fallback-key" {
+		t.Errorf("want fallback-key, got %s", c.apiKey)
+	}
+}
+
+func TestNewClient_BothEmpty(t *testing.T) {
+	c := NewClient("", "", "", "")
+	if c != nil {
+		t.Error("expected nil client when both keys are empty")
+	}
+}
+
+func TestNewClient_Defaults(t *testing.T) {
+	c := NewClient("k", "", "", "")
+	if c.baseURL != "https://api.openai.com/v1" {
+		t.Errorf("want default baseURL, got %s", c.baseURL)
+	}
+	if c.model != "text-embedding-3-small" {
+		t.Errorf("want default model, got %s", c.model)
+	}
+}
+
+func TestNewClient_CustomValues(t *testing.T) {
+	c := NewClient("k", "", "http://localhost:11434/v1/", "nomic-embed-text")
+	if c.baseURL != "http://localhost:11434/v1" {
+		t.Errorf("trailing slash not stripped, got %s", c.baseURL)
+	}
+	if c.model != "nomic-embed-text" {
+		t.Errorf("want nomic-embed-text, got %s", c.model)
+	}
+}
+
 // --- NewClientFromEnv ---
 
 func TestNewClientFromEnv_NoKey(t *testing.T) {

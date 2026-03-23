@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,22 +88,27 @@ func TestGetProjectDbPath(t *testing.T) {
 
 // --- GetConfigDir / GetConfigPath ---
 
-func TestGetConfigDir_UsesHome(t *testing.T) {
+func TestGetConfigDir_ReturnsMemtraceSubdir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "") // prevent interference on Linux
 
 	got := GetConfigDir()
-	want := filepath.Join(home, ".config", "memtrace")
-	if got != want {
-		t.Errorf("want %s, got %s", want, got)
+	// Platform-agnostic: path must be absolute and end in "memtrace".
+	if !filepath.IsAbs(got) {
+		t.Errorf("expected absolute path, got: %s", got)
+	}
+	if !strings.HasSuffix(got, "memtrace") {
+		t.Errorf("expected path ending in 'memtrace', got: %s", got)
 	}
 }
 
 func TestGetConfigPath_UnderConfigDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
-	want := filepath.Join(home, ".config", "memtrace", "config.json")
+	want := filepath.Join(GetConfigDir(), "config.json")
 	if got := GetConfigPath(); got != want {
 		t.Errorf("want %s, got %s", want, got)
 	}
@@ -113,6 +119,7 @@ func TestGetConfigPath_UnderConfigDir(t *testing.T) {
 func TestGetProjectConfig_FileAbsent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	cfg := GetProjectConfig()
 	if cfg == nil {
@@ -126,8 +133,9 @@ func TestGetProjectConfig_FileAbsent(t *testing.T) {
 func TestGetProjectConfig_ValidFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
-	cfgDir := filepath.Join(home, ".config", "memtrace")
+	cfgDir := GetConfigDir()
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +163,9 @@ func TestGetProjectConfig_ValidFile(t *testing.T) {
 func TestGetProjectConfig_MalformedJSON(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
-	cfgDir := filepath.Join(home, ".config", "memtrace")
+	cfgDir := GetConfigDir()
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +187,7 @@ func TestGetProjectConfig_MalformedJSON(t *testing.T) {
 func TestSaveProjectConfig_RoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	cfg := &ProjectConfig{
 		Projects: map[string]ProjectEntry{
@@ -213,6 +223,7 @@ func TestSaveProjectConfig_RoundTrip(t *testing.T) {
 func TestSaveProjectConfig_CreatesDirectories(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	// Config dir does not exist yet
 	cfg := &ProjectConfig{Projects: make(map[string]ProjectEntry)}
@@ -223,6 +234,38 @@ func TestSaveProjectConfig_CreatesDirectories(t *testing.T) {
 		t.Errorf("config file not created: %v", err)
 	}
 }
+
+// --- EmbedConfig ---
+
+func TestEmbedConfig_RoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	cfg := &ProjectConfig{
+		Projects: make(map[string]ProjectEntry),
+		Embed: EmbedConfig{
+			Key:   "sk-test-key",
+			URL:   "http://localhost:11434/v1",
+			Model: "nomic-embed-text",
+		},
+	}
+	if err := SaveProjectConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got := GetProjectConfig()
+	if got.Embed.Key != "sk-test-key" {
+		t.Errorf("Embed.Key: want sk-test-key, got %q", got.Embed.Key)
+	}
+	if got.Embed.URL != "http://localhost:11434/v1" {
+		t.Errorf("Embed.URL: want http://localhost:11434/v1, got %q", got.Embed.URL)
+	}
+	if got.Embed.Model != "nomic-embed-text" {
+		t.Errorf("Embed.Model: want nomic-embed-text, got %q", got.Embed.Model)
+	}
+}
+
 
 // --- GenerateID ---
 

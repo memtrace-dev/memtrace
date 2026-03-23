@@ -241,6 +241,29 @@ func (s *MemoryStore) TouchAccess(id string, now time.Time) error {
 	return err
 }
 
+// FindUnembedded returns IDs and content for all active memories in the project
+// that have no stored embedding (embedding IS NULL).
+func (s *MemoryStore) FindUnembedded(projectID string) ([]struct{ ID, Content string }, error) {
+	rows, err := s.db.Query(`
+		SELECT id, content FROM memories
+		WHERE project_id = ? AND status = 'active' AND embedding IS NULL
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []struct{ ID, Content string }
+	for rows.Next() {
+		var r struct{ ID, Content string }
+		if err := rows.Scan(&r.ID, &r.Content); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 // StoreEmbedding persists a precomputed embedding vector for a memory.
 func (s *MemoryStore) StoreEmbedding(id string, vec []float64) error {
 	b, err := json.Marshal(vec)

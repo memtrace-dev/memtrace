@@ -206,6 +206,10 @@ memtrace export  [--output memories.json] [--type decision] [--status active]
 memtrace import  <file|url> [--type decision] [--dry-run]
 memtrace serve   [--dir <path>]
 memtrace status  [--json]
+memtrace reindex
+memtrace config  get
+memtrace config  set <key> <value>
+memtrace config  unset <key>
 ```
 
 ---
@@ -216,15 +220,33 @@ When an embedding API is configured, `memory_recall` and `memtrace search` switc
 
 Any OpenAI-compatible endpoint works, including Ollama running locally.
 
-| Variable | Default | Description |
-|---|---|---|
-| `MEMTRACE_EMBED_KEY` | — | API key. Falls back to `OPENAI_API_KEY`. **Required** to enable. |
-| `MEMTRACE_EMBED_URL` | `https://api.openai.com/v1` | Base URL of the embeddings API. |
-| `MEMTRACE_EMBED_MODEL` | `text-embedding-3-small` | Model name. |
+### Setup
 
-Because `memtrace serve` is launched by your MCP client, the variables must be in the MCP server configuration — not just your shell profile.
+The recommended way is to persist the settings in memtrace's own config — this makes CLI commands like `memtrace search` and `memtrace reindex` work without needing to set environment variables each time:
 
-### Claude Code
+```bash
+memtrace config set embed.key sk-...
+memtrace config set embed.model text-embedding-3-small   # optional, this is the default
+memtrace config set embed.url https://api.openai.com/v1  # optional, this is the default
+```
+
+Settings are stored in the OS config directory (`~/Library/Application Support/memtrace/config.json` on macOS, `~/.config/memtrace/config.json` on Linux, `%AppData%\memtrace\config.json` on Windows). Environment variables always take precedence over config file values.
+
+### Backfilling existing memories
+
+Memories saved before the embedding key was configured have no stored vector. Run `reindex` once to backfill them:
+
+```bash
+memtrace reindex
+```
+
+### MCP server configuration
+
+If you used `memtrace config set` to persist your embed settings, the MCP server picks them up automatically — no extra configuration needed.
+
+If you prefer environment variables (e.g. to avoid storing the key on disk), pass them in the MCP client config:
+
+#### Claude Code
 
 Pass env vars with `--env` when registering the server:
 
@@ -252,7 +274,7 @@ Or edit `.claude/mcp.json` directly:
 }
 ```
 
-### Cursor
+#### Cursor
 
 Add an `env` block to `.cursor/mcp.json`:
 
@@ -271,7 +293,7 @@ Add an `env` block to `.cursor/mcp.json`:
 }
 ```
 
-### Local Ollama
+#### Local Ollama
 
 ```json
 "env": {
@@ -280,6 +302,16 @@ Add an `env` block to `.cursor/mcp.json`:
   "MEMTRACE_EMBED_MODEL": "nomic-embed-text"
 }
 ```
+
+### Environment variables
+
+Environment variables override config file values.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MEMTRACE_EMBED_KEY` | — | API key. Falls back to `OPENAI_API_KEY`. **Required** to enable. |
+| `MEMTRACE_EMBED_URL` | `https://api.openai.com/v1` | Base URL of the embeddings API. |
+| `MEMTRACE_EMBED_MODEL` | `text-embedding-3-small` | Model name. |
 
 ---
 

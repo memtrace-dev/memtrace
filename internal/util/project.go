@@ -48,15 +48,55 @@ type ProjectEntry struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// ProjectConfig represents the contents of ~/.config/memtrace/config.json.
+// EmbedConfig holds optional embedding API settings persisted in the global config.
+// Environment variables always take precedence over these values.
+type EmbedConfig struct {
+	Key   string `json:"key,omitempty"`
+	URL   string `json:"url,omitempty"`
+	Model string `json:"model,omitempty"`
+}
+
+// ProjectConfig represents the contents of the global config.json.
 type ProjectConfig struct {
 	Projects map[string]ProjectEntry `json:"projects"`
+	Embed    EmbedConfig             `json:"embed,omitempty"`
 }
 
 // GetProjectConfig reads and returns the global config.
 // Returns an empty config (not an error) if the file doesn't exist yet.
+// If a legacy config exists at ~/.config/memtrace/config.json and contains
+// projects not present in the primary config, they are merged in and the
+// merged result is saved to the primary location.
 func GetProjectConfig() *ProjectConfig {
-	data, err := os.ReadFile(GetConfigPath())
+	primary := GetConfigPath()
+	cfg := readConfig(primary)
+
+	// Check for a legacy config at ~/.config/memtrace/config.json (used before
+	// os.UserConfigDir() was adopted). Merge any projects that are missing from
+	// the primary config, then persist so future reads are self-contained.
+	legacy := legacyConfigPath()
+	if legacy != "" && legacy != primary {
+		if lcfg := readConfig(legacy); len(lcfg.Projects) > 0 {
+			merged := false
+			for k, v := range lcfg.Projects {
+				if _, exists := cfg.Projects[k]; !exists {
+					cfg.Projects[k] = v
+					merged = true
+				}
+			}
+			if merged {
+				_ = os.MkdirAll(GetConfigDir(), 0755)
+				_ = SaveProjectConfig(cfg)
+			}
+		}
+	}
+
+	return cfg
+}
+
+// readConfig reads and parses a config file. Returns an empty config on any error.
+func readConfig(path string) *ProjectConfig {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return &ProjectConfig{Projects: make(map[string]ProjectEntry)}
 	}
@@ -68,6 +108,16 @@ func GetProjectConfig() *ProjectConfig {
 		cfg.Projects = make(map[string]ProjectEntry)
 	}
 	return &cfg
+}
+
+// legacyConfigPath returns the old ~/.config/memtrace/config.json path that was
+// used before os.UserConfigDir() was adopted. Returns "" if it cannot be determined.
+func legacyConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "memtrace", "config.json")
 }
 
 // SaveProjectConfig writes the config to disk, creating the directory if needed.
