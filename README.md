@@ -79,7 +79,7 @@ memtrace setup
 # 3. Start a new Claude Code session — memory is live
 ```
 
-That's it. Your agent now has `memory_save`, `memory_recall`, `memory_get`, `memory_forget`, `memory_update`, and `memory_context` available in every session.
+That's it. Your agent now has `memory_save`, `memory_recall`, `memory_get`, `memory_forget`, `memory_update`, `memory_context`, and `memory_prompt` available in every session.
 
 ---
 
@@ -112,7 +112,8 @@ memory_save(
   content:    "We use JWT with RS256 — stateless API, no session storage",
   type:       "decision",           // decision | convention | fact | event
   tags:       ["auth", "security"],
-  file_paths: ["src/middleware/auth.go"]
+  file_paths: ["src/middleware/auth.go"],
+  topic_key:  "decision/auth"       // optional — re-saving with the same key updates instead of duplicating
 )
 ```
 
@@ -158,6 +159,19 @@ memory_update(
   confidence: 0.8
 )
 ```
+
+### `memory_prompt`
+
+Capture the user's original request at the start of a session. Call this before any other memory operations so future sessions can understand what was attempted and why.
+
+```
+memory_prompt(
+  content:    "Refactor the auth middleware to support multi-tenant JWT validation",
+  file_paths: ["src/auth/middleware.go"]
+)
+```
+
+Saves as an `event` memory tagged `prompt`. Shows up in session history alongside the auto-generated session summary.
 
 ### `memory_context`
 
