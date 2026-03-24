@@ -93,8 +93,7 @@ func newInitCmd() *cobra.Command {
 				fmt.Printf("Imported %d memories (%s)\n", result.Total, strings.Join(parts, ", "))
 			}
 
-			fmt.Println("\nAdd to your Claude Code or Cursor MCP config:")
-			fmt.Println(`  { "memtrace": { "command": "memtrace", "args": ["serve"] } }`)
+			fmt.Println("\nNext: run 'memtrace setup' to wire the MCP server into your agent.")
 			return nil
 		},
 	}

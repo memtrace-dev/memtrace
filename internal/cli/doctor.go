@@ -120,6 +120,7 @@ func checkMCPConfig(projectRoot string, ok, warn, fail func(string, string)) {
 	}{
 		{filepath.Join(projectRoot, ".claude", "mcp.json"), ".claude/mcp.json"},
 		{filepath.Join(projectRoot, ".cursor", "mcp.json"), ".cursor/mcp.json"},
+		{filepath.Join(projectRoot, ".vscode", "mcp.json"), ".vscode/mcp.json"},
 		{claudeUserMCPConfig(), "~/.claude/mcp.json"},
 	}
 
@@ -133,7 +134,7 @@ func checkMCPConfig(projectRoot string, ok, warn, fail func(string, string)) {
 			return
 		}
 	}
-	warn("MCP config", "memtrace not found in any MCP config — run 'claude mcp add memtrace memtrace serve'")
+	warn("MCP config", "memtrace not found in any MCP config — run 'memtrace setup'")
 }
 
 func claudeUserMCPConfig() string {

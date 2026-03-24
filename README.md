@@ -73,8 +73,8 @@ make install
 cd your-project
 memtrace init
 
-# 2. Wire up the MCP server (Claude Code)
-claude mcp add memtrace memtrace serve
+# 2. Wire up the MCP server
+memtrace setup
 
 # 3. Start a new Claude Code session — memory is live
 ```
@@ -85,45 +85,19 @@ That's it. Your agent now has `memory_save`, `memory_recall`, `memory_forget`, `
 
 ## MCP Configuration
 
-### Claude Code
+`memtrace setup` writes the MCP config for you — no manual JSON editing needed.
 
 ```bash
-# Project-scoped (recommended — one setup per project)
-claude mcp add memtrace memtrace serve
-
-# User-scoped (available in all projects that have been initialized)
-claude mcp add --scope user memtrace memtrace serve
+memtrace setup              # auto-detect agents from .claude/, .cursor/, .vscode/
+memtrace setup claude-code  # Claude Code, project scope (.claude/mcp.json)
+memtrace setup cursor       # Cursor (.cursor/mcp.json)
+memtrace setup vscode       # VS Code (.vscode/mcp.json)
+memtrace setup --global     # Claude Code, user scope (~/.claude/mcp.json)
 ```
+
+The command is idempotent and merges into existing configs without overwriting other entries.
 
 `memtrace init` automatically adds instructions to `CLAUDE.md` so Claude routes memory operations to memtrace instead of its built-in memory tools.
-
-### Cursor
-
-Add to `.cursor/mcp.json` in your project:
-
-```json
-{
-  "mcpServers": {
-    "memtrace": {
-      "command": "memtrace",
-      "args": ["serve"]
-    }
-  }
-}
-```
-
-### Other MCP clients
-
-```json
-{
-  "mcpServers": {
-    "memtrace": {
-      "command": "memtrace",
-      "args": ["serve"]
-    }
-  }
-}
-```
 
 ---
 
@@ -219,6 +193,7 @@ Skip with `--no-import` if you want a clean start.
 
 ```
 memtrace init    [--name <name>] [--no-import]
+memtrace setup   [claude-code|cursor|vscode] [--global]
 memtrace save    <content> [--type decision|convention|fact|event] [--tags auth,api] [--files src/auth.go] [--confidence 0.9]
 memtrace update  <id|prefix> [--content "..."] [--type ...] [--tags ...] [--files ...] [--confidence 0.9]
 memtrace edit    <id|prefix>

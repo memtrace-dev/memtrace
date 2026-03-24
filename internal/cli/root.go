@@ -17,6 +17,7 @@ func NewRootCmd(version ...string) *cobra.Command {
 
 	root.AddCommand(
 		newInitCmd(),
+		newSetupCmd(),
 		newSaveCmd(),
 		newUpdateCmd(),
 		newEditCmd(),
