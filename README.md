@@ -207,6 +207,7 @@ memtrace import  <file|url> [--type decision] [--dry-run]
 memtrace serve   [--dir <path>]
 memtrace status  [--json]
 memtrace reindex
+memtrace scan
 memtrace config  get
 memtrace config  set <key> <value>
 memtrace config  unset <key>
@@ -216,7 +217,7 @@ memtrace config  unset <key>
 
 ## Semantic search
 
-`memory_recall` and `memtrace search` use hybrid BM25 + semantic (cosine similarity) scoring when an embedder is available, giving better results for paraphrased or conceptually related queries. Without an embedder, memtrace falls back to BM25-only search.
+`memory_recall` and `memtrace search` use hybrid BM25 + semantic scoring when an embedder is available. The pipeline runs both FTS keyword search and vector similarity search independently, then merges the candidate pools — so memories that match on meaning but not exact keywords still surface. Without an embedder, memtrace falls back to BM25-only search.
 
 ### Zero-config with Ollama
 
@@ -318,6 +319,26 @@ Environment variables override config file values.
 | `MEMTRACE_EMBED_URL` | `https://api.openai.com/v1` | Base URL of the embeddings API. |
 | `MEMTRACE_EMBED_MODEL` | `text-embedding-3-small` | Model name. |
 | `MEMTRACE_EMBED_PROVIDER` | `auto` | Set to `disabled` to turn off embeddings entirely. |
+
+---
+
+## Staleness detection
+
+Memories that reference source files can go stale when those files change. Run `memtrace scan` to check:
+
+```bash
+memtrace scan
+```
+
+```
+  stale  01ABCDEF1234  "Auth uses RS256 JWT..." — file modified: src/auth/middleware.go
+  stale  01EFGH567890  "Schema migration v3..." — file deleted: db/migrations/003.sql
+
+2 memories marked stale (11 unchanged).
+Run 'memtrace list --status stale' to review.
+```
+
+A memory is marked stale when any of its `file_paths` has been deleted or modified more recently than the memory was last updated. Run `memtrace list --status stale` to review and either update or archive them.
 
 ---
 
