@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/memtrace-dev/memtrace/internal/ingestion"
 	"github.com/memtrace-dev/memtrace/internal/types"
@@ -10,18 +12,36 @@ import (
 
 func newImportCmd() *cobra.Command {
 	var memType string
+	var format string
 	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "import <file|url>",
-		Short: "Import memories from a JSON file or URL",
-		Long: `Import memories from a JSON file (memtrace export format) or an HTTP/HTTPS URL.
+		Short: "Import memories from a JSON or Markdown file or URL",
+		Long: `Import memories from a file or HTTP/HTTPS URL.
 
-The source must contain a JSON array of memory objects, or a single memory object.
+Supported formats:
+  JSON     — memtrace export format (array or single memory object)
+  Markdown — memtrace export format (.md files are auto-detected)
+
 Use --dry-run to preview what would be imported without saving.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			inputs, err := ingestion.ImportJSON(args[0])
+			source := args[0]
+
+			useMarkdown := format == "markdown"
+			if !useMarkdown && format == "" {
+				ext := strings.ToLower(filepath.Ext(source))
+				useMarkdown = ext == ".md" || ext == ".markdown"
+			}
+
+			var inputs []types.MemorySaveInput
+			var err error
+			if useMarkdown {
+				inputs, err = ingestion.ImportMarkdown(source)
+			} else {
+				inputs, err = ingestion.ImportJSON(source)
+			}
 			if err != nil {
 				return err
 			}
@@ -73,6 +93,7 @@ Use --dry-run to preview what would be imported without saving.`,
 	}
 
 	cmd.Flags().StringVar(&memType, "type", "", "Only import memories of this type: decision, convention, fact, event")
+	cmd.Flags().StringVar(&format, "format", "", "Force format: json, markdown (default: auto-detect by extension)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview what would be imported without saving")
 	return cmd
 }
