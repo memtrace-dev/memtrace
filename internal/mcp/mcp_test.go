@@ -17,6 +17,8 @@ import (
 
 func setupServer(t *testing.T) (*server.MCPServer, *kernel.MemoryKernel) {
 	t.Helper()
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
+	t.Setenv("MEMTRACE_EMBED_URL", "")
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	k := kernel.New(dbPath, "test-project")
 	if err := k.Open(); err != nil {
@@ -25,7 +27,7 @@ func setupServer(t *testing.T) (*server.MCPServer, *kernel.MemoryKernel) {
 	t.Cleanup(func() { k.Close() })
 
 	s := server.NewMCPServer("memtrace", "0.0.0", server.WithToolCapabilities(true))
-	registerTools(s, k)
+	registerTools(s, k, newSessionTracker())
 	return s, k
 }
 
@@ -482,6 +484,110 @@ func TestMemoryContextTool_MultipleFiles(t *testing.T) {
 	}
 	if !strings.Contains(text, "Middleware chains") {
 		t.Errorf("expected second memory, got: %s", text)
+	}
+}
+
+// --- sessionTracker ---
+
+func TestSessionTracker_EmptyNoSummary(t *testing.T) {
+	tr := newSessionTracker()
+	if got := tr.summary(); got != "" {
+		t.Errorf("expected empty summary for no activity, got: %s", got)
+	}
+}
+
+func TestSessionTracker_RecallOnlyNoSummary(t *testing.T) {
+	tr := newSessionTracker()
+	tr.recordRecall()
+	tr.recordRecall()
+	if got := tr.summary(); got != "" {
+		t.Errorf("expected empty summary for recall-only session, got: %s", got)
+	}
+}
+
+func TestSessionTracker_OneSave(t *testing.T) {
+	tr := newSessionTracker()
+	tr.recordSave("id1", "We use JWT with RS256", types.MemoryTypeDecision)
+
+	got := tr.summary()
+	if got == "" {
+		t.Fatal("expected non-empty summary")
+	}
+	if !strings.Contains(got, "saved 1 memory") {
+		t.Errorf("expected singular 'memory', got: %s", got)
+	}
+	if !strings.Contains(got, "JWT with RS256") {
+		t.Errorf("expected memory summary in output, got: %s", got)
+	}
+	if !strings.Contains(got, "[decision]") {
+		t.Errorf("expected type label, got: %s", got)
+	}
+}
+
+func TestSessionTracker_MultipleSavesAndRecalls(t *testing.T) {
+	tr := newSessionTracker()
+	tr.recordSave("id1", "Auth uses RS256", types.MemoryTypeDecision)
+	tr.recordSave("id2", "Error handling convention", types.MemoryTypeConvention)
+	tr.recordRecall()
+	tr.recordRecall()
+	tr.recordRecall()
+
+	got := tr.summary()
+	if !strings.Contains(got, "saved 2 memories") {
+		t.Errorf("expected plural 'memories', got: %s", got)
+	}
+	if !strings.Contains(got, "Recalled 3 times") {
+		t.Errorf("expected recall count, got: %s", got)
+	}
+}
+
+func TestSessionTracker_SaveTool_RecordsInTracker(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	k := kernel.New(dbPath, "test-project")
+	if err := k.Open(); err != nil {
+		t.Fatalf("open kernel: %v", err)
+	}
+	defer k.Close()
+
+	s := server.NewMCPServer("memtrace", "0.0.0", server.WithToolCapabilities(true))
+	tr := newSessionTracker()
+	registerTools(s, k, tr)
+
+	callTool(t, s, "memory_save", map[string]interface{}{
+		"content": "Test decision about architecture",
+		"type":    "decision",
+	})
+
+	sum := tr.summary()
+	if sum == "" {
+		t.Fatal("expected summary after save tool call")
+	}
+	if !strings.Contains(sum, "Test decision") {
+		t.Errorf("expected memory content in summary, got: %s", sum)
+	}
+}
+
+func TestSessionTracker_RecallTool_RecordsInTracker(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	k := kernel.New(dbPath, "test-project")
+	if err := k.Open(); err != nil {
+		t.Fatalf("open kernel: %v", err)
+	}
+	defer k.Close()
+
+	s := server.NewMCPServer("memtrace", "0.0.0", server.WithToolCapabilities(true))
+	tr := newSessionTracker()
+	registerTools(s, k, tr)
+
+	callTool(t, s, "memory_recall", map[string]interface{}{"query": "anything"})
+	callTool(t, s, "memory_recall", map[string]interface{}{"query": "more"})
+
+	tr.mu.Lock()
+	count := tr.recallCount
+	tr.mu.Unlock()
+
+	if count != 2 {
+		t.Errorf("expected recallCount=2, got %d", count)
 	}
 }
 

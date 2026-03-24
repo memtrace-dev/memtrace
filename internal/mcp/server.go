@@ -12,7 +12,8 @@ import (
 	"github.com/memtrace-dev/memtrace/internal/types"
 )
 
-// Serve starts the MCP server over stdio. Blocks until the connection closes.
+// Serve starts the MCP server over stdio. Blocks until the connection closes,
+// then auto-saves a session summary if any memories were saved.
 func Serve(k *kernel.MemoryKernel) error {
 	s := server.NewMCPServer(
 		"memtrace",
@@ -20,12 +21,25 @@ func Serve(k *kernel.MemoryKernel) error {
 		server.WithToolCapabilities(true),
 	)
 
-	registerTools(s, k)
+	tracker := newSessionTracker()
+	registerTools(s, k, tracker)
 
-	return server.ServeStdio(s)
+	err := server.ServeStdio(s)
+
+	// Auto-save session summary (best-effort, never blocks the shutdown).
+	if text := tracker.summary(); text != "" {
+		_, _ = k.Save(types.MemorySaveInput{
+			Content: text,
+			Type:    types.MemoryTypeEvent,
+			Source:  types.MemorySourceAgent,
+			Tags:    []string{"session"},
+		})
+	}
+
+	return err
 }
 
-func registerTools(s *server.MCPServer, k *kernel.MemoryKernel) {
+func registerTools(s *server.MCPServer, k *kernel.MemoryKernel, tracker *sessionTracker) {
 	// Tool 1: memory_save
 	s.AddTool(
 		mcp.NewTool("memory_save",
@@ -61,6 +75,7 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel) {
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
+			tracker.recordSave(mem.ID, mem.Summary, mem.Type)
 			text := fmt.Sprintf("Saved memory %s (%s): %s", mem.ID, mem.Type, mem.Summary)
 			return mcp.NewToolResultText(text), nil
 		},
@@ -98,6 +113,7 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel) {
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
+			tracker.recordRecall()
 			if len(results) == 0 {
 				return mcp.NewToolResultText("No relevant memories found."), nil
 			}

@@ -335,6 +335,23 @@ Environment variables override config file values.
 
 ---
 
+## Session auto-summarization
+
+When an MCP session ends, memtrace automatically saves a compact event memory recording what happened:
+
+```
+Session 2026-03-23T14:32Z (45m): saved 3 memories — "We use JWT with RS256" [decision],
+"Error handling convention" [convention], "DB schema on v2" [fact]. Recalled 5 times.
+```
+
+The summary is only saved if at least one memory was written during the session — read-only sessions produce no noise. Sessions are tagged `session` and can be reviewed with:
+
+```bash
+memtrace list --type event
+```
+
+---
+
 ## Staleness detection
 
 Memories that reference source files can go stale when those files change. Run `memtrace scan` to check:
