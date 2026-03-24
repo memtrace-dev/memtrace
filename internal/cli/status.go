@@ -56,15 +56,18 @@ func newStatusCmd() *cobra.Command {
 			// DB size
 			dbSize := dbFileSize(dbPath)
 
+			embedProvider, embedModel := k.EmbedInfo()
 			if asJSON {
 				out := map[string]interface{}{
-					"project": entry.Name,
-					"root":    projectRoot,
-					"db_path": dbPath,
-					"db_size": dbSize,
-					"total":   total,
-					"by_type": counts,
-					"by_status": statusCounts,
+					"project":       entry.Name,
+					"root":          projectRoot,
+					"db_path":       dbPath,
+					"db_size":       dbSize,
+					"total":         total,
+					"by_type":       counts,
+					"by_status":     statusCounts,
+					"embed_provider": embedProvider,
+					"embed_model":   embedModel,
 				}
 				return json.NewEncoder(os.Stdout).Encode(out)
 			}
@@ -85,6 +88,13 @@ func newStatusCmd() *cobra.Command {
 			fmt.Println()
 			fmt.Printf("Status:    %d active, %d stale, %d archived\n",
 				statusCounts["active"], statusCounts["stale"], statusCounts["archived"])
+
+			fmt.Println()
+			if embedProvider == "disabled" {
+				dim.Printf("Embeddings: disabled\n")
+			} else {
+				fmt.Printf("Embeddings: %s (%s)\n", embedProvider, embedModel)
+			}
 			return nil
 		},
 	}

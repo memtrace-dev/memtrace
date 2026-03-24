@@ -27,11 +27,18 @@ type Embedder interface {
 
 // Client is an OpenAI-compatible embeddings client.
 type Client struct {
-	baseURL string
-	model   string
-	apiKey  string
-	http    *http.Client
+	baseURL  string
+	model    string
+	apiKey   string
+	http     *http.Client
+	provider string // "openai", "ollama", "local", "custom"
 }
+
+// Provider returns a label for the embedding backend ("openai", "ollama", "local", "custom").
+func (c *Client) Provider() string { return c.provider }
+
+// Model returns the model name used by this client.
+func (c *Client) Model() string { return c.model }
 
 // NewClientFromEnv creates a Client from environment variables.
 // Returns nil if no API key is configured — callers treat nil as "embeddings disabled".
@@ -63,11 +70,23 @@ func NewClient(key, fallbackKey, baseURL, model string) *Client {
 	if model == "" {
 		model = "text-embedding-3-small"
 	}
+
+	provider := "custom"
+	switch {
+	case strings.Contains(baseURL, "api.openai.com"):
+		provider = "openai"
+	case strings.Contains(baseURL, "11434"):
+		provider = "ollama"
+	case strings.Contains(baseURL, "localhost") || strings.Contains(baseURL, "127.0.0.1"):
+		provider = "local"
+	}
+
 	return &Client{
-		baseURL: baseURL,
-		model:   model,
-		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		baseURL:  baseURL,
+		model:    model,
+		apiKey:   apiKey,
+		http:     &http.Client{Timeout: 10 * time.Second},
+		provider: provider,
 	}
 }
 

@@ -20,21 +20,22 @@ func newConfigCmd() *cobra.Command {
 
 // Supported keys and where they map in EmbedConfig.
 var configKeys = map[string]string{
-	"embed.key":   "Embedding API key (MEMTRACE_EMBED_KEY / OPENAI_API_KEY)",
-	"embed.url":   "Embedding API base URL (MEMTRACE_EMBED_URL)",
-	"embed.model": "Embedding model name (MEMTRACE_EMBED_MODEL)",
+	"embed.key":      "Embedding API key (MEMTRACE_EMBED_KEY / OPENAI_API_KEY)",
+	"embed.url":      "Embedding API base URL (MEMTRACE_EMBED_URL)",
+	"embed.model":    "Embedding model name (MEMTRACE_EMBED_MODEL)",
+	"embed.provider": `Embedding provider override: "auto" (default) or "disabled"`,
 }
 
 func newConfigSetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "Set a config value",
-		Long:  "Set a config value.\n\nKeys: embed.key, embed.url, embed.model",
+		Long:  "Set a config value.\n\nKeys: embed.key, embed.url, embed.model, embed.provider",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, value := strings.ToLower(args[0]), args[1]
 			if _, ok := configKeys[key]; !ok {
-				return fmt.Errorf("unknown key %q — valid keys: embed.key, embed.url, embed.model", key)
+				return fmt.Errorf("unknown key %q — valid keys: embed.key, embed.url, embed.model, embed.provider", key)
 			}
 
 			cfg := util.GetProjectConfig()
@@ -57,7 +58,7 @@ func newConfigUnsetCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key := strings.ToLower(args[0])
 			if _, ok := configKeys[key]; !ok {
-				return fmt.Errorf("unknown key %q — valid keys: embed.key, embed.url, embed.model", key)
+				return fmt.Errorf("unknown key %q — valid keys: embed.key, embed.url, embed.model, embed.provider", key)
 			}
 
 			cfg := util.GetProjectConfig()
@@ -85,6 +86,7 @@ func newConfigGetCmd() *cobra.Command {
 			printConfigRow(dim, "embed.key", maskKey(cfg.Embed.Key))
 			printConfigRow(dim, "embed.url", cfg.Embed.URL)
 			printConfigRow(dim, "embed.model", cfg.Embed.Model)
+			printConfigRow(dim, "embed.provider", cfg.Embed.Provider)
 			return nil
 		},
 	}
@@ -98,6 +100,8 @@ func applyEmbedKey(cfg *util.ProjectConfig, key, value string) {
 		cfg.Embed.URL = value
 	case "embed.model":
 		cfg.Embed.Model = value
+	case "embed.provider":
+		cfg.Embed.Provider = value
 	}
 }
 

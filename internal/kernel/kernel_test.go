@@ -229,9 +229,11 @@ func TestKernel_HasEmbedder_False(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("MEMTRACE_EMBED_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("MEMTRACE_EMBED_URL", "")
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
 	k := setupTestKernel(t)
 	if k.HasEmbedder() {
-		t.Error("expected HasEmbedder=false when no key is set")
+		t.Error("expected HasEmbedder=false when provider is disabled")
 	}
 }
 
@@ -243,11 +245,41 @@ func TestKernel_HasEmbedder_True(t *testing.T) {
 	}
 }
 
+func TestKernel_HasEmbedder_LocalURL(t *testing.T) {
+	// A local URL without a key should still enable embeddings.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type resp struct {
+			Data []struct {
+				Embedding []float64 `json:"embedding"`
+			} `json:"data"`
+		}
+		json.NewEncoder(w).Encode(resp{Data: []struct {
+			Embedding []float64 `json:"embedding"`
+		}{{Embedding: []float64{0.1, 0.2}}}})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MEMTRACE_EMBED_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("MEMTRACE_EMBED_URL", srv.URL)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "")
+	k := setupTestKernel(t)
+	if !k.HasEmbedder() {
+		t.Error("expected HasEmbedder=true when local URL is set without key")
+	}
+	provider, _ := k.EmbedInfo()
+	if provider == "disabled" {
+		t.Errorf("expected non-disabled provider, got %s", provider)
+	}
+}
+
 func TestKernel_Reindex_NoEmbedder(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("MEMTRACE_EMBED_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("MEMTRACE_EMBED_URL", "")
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
 	k := setupTestKernel(t)
 	k.Save(types.MemorySaveInput{Content: "no embedder memory"})
 

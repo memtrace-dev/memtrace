@@ -51,9 +51,10 @@ type ProjectEntry struct {
 // EmbedConfig holds optional embedding API settings persisted in the global config.
 // Environment variables always take precedence over these values.
 type EmbedConfig struct {
-	Key   string `json:"key,omitempty"`
-	URL   string `json:"url,omitempty"`
-	Model string `json:"model,omitempty"`
+	Key      string `json:"key,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Provider string `json:"provider,omitempty"` // "" or "auto" = auto-detect; "disabled" = off
 }
 
 // ProjectConfig represents the contents of the global config.json.

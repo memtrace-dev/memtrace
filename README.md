@@ -1,6 +1,6 @@
 # memtrace
 
-Persistent memory for AI coding agents — local, structured, zero-config.
+Persistent, searchable memory for AI coding agents — local, structured, zero-config.
 
 Memtrace gives Claude Code, Cursor, and any MCP-compatible agent a memory that survives every new session. Architectural decisions, project conventions, and codebase knowledge — all there the next time you open a chat.
 
@@ -216,91 +216,96 @@ memtrace config  unset <key>
 
 ## Semantic search
 
-When an embedding API is configured, `memory_recall` and `memtrace search` switch to hybrid BM25 + semantic (cosine similarity) scoring — giving better results for paraphrased or conceptually related queries. Without configuration, memtrace falls back to BM25-only search.
+`memory_recall` and `memtrace search` use hybrid BM25 + semantic (cosine similarity) scoring when an embedder is available, giving better results for paraphrased or conceptually related queries. Without an embedder, memtrace falls back to BM25-only search.
 
-Any OpenAI-compatible endpoint works, including Ollama running locally.
+### Zero-config with Ollama
 
-### Setup
+If [Ollama](https://ollama.com) is running on your machine, memtrace auto-detects it and uses it — no configuration needed:
 
-The recommended way is to persist the settings in memtrace's own config — this makes CLI commands like `memtrace search` and `memtrace reindex` work without needing to set environment variables each time:
+```bash
+ollama pull nomic-embed-text
+# that's it — memtrace picks it up automatically
+```
+
+Verify with `memtrace status`:
+
+```
+Embeddings: ollama (nomic-embed-text)
+```
+
+### OpenAI (or any compatible API)
+
+Persist the settings in memtrace's config so CLI commands and the MCP server both pick them up:
 
 ```bash
 memtrace config set embed.key sk-...
 memtrace config set embed.model text-embedding-3-small   # optional, this is the default
-memtrace config set embed.url https://api.openai.com/v1  # optional, this is the default
 ```
 
-Settings are stored in the OS config directory (`~/Library/Application Support/memtrace/config.json` on macOS, `~/.config/memtrace/config.json` on Linux, `%AppData%\memtrace\config.json` on Windows). Environment variables always take precedence over config file values.
+Settings are stored in the OS config directory (`~/Library/Application Support/memtrace/config.json` on macOS, `~/.config/memtrace/config.json` on Linux, `%AppData%\memtrace\config.json` on Windows). Environment variables always take precedence.
+
+#### Passing via MCP client (Claude Code)
+
+```bash
+claude mcp add memtrace \
+  --env MEMTRACE_EMBED_KEY=sk-... \
+  memtrace serve
+```
+
+Or in `.claude/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "memtrace": {
+      "command": "memtrace",
+      "args": ["serve"],
+      "env": {
+        "MEMTRACE_EMBED_KEY": "sk-..."
+      }
+    }
+  }
+}
+```
+
+#### Passing via MCP client (Cursor)
+
+```json
+{
+  "mcpServers": {
+    "memtrace": {
+      "command": "memtrace",
+      "args": ["serve"],
+      "env": {
+        "MEMTRACE_EMBED_KEY": "sk-..."
+      }
+    }
+  }
+}
+```
+
+### Custom local server
+
+Any OpenAI-compatible endpoint works without an API key. Set the URL and model; memtrace sends a placeholder auth header that local servers ignore:
+
+```bash
+memtrace config set embed.url http://localhost:8080/v1
+memtrace config set embed.model my-model
+```
 
 ### Backfilling existing memories
 
-Memories saved before the embedding key was configured have no stored vector. Run `reindex` once to backfill them:
+Memories saved before an embedder was configured have no stored vector. Run `reindex` once to backfill them:
 
 ```bash
 memtrace reindex
 ```
 
-### MCP server configuration
-
-If you used `memtrace config set` to persist your embed settings, the MCP server picks them up automatically — no extra configuration needed.
-
-If you prefer environment variables (e.g. to avoid storing the key on disk), pass them in the MCP client config:
-
-#### Claude Code
-
-Pass env vars with `--env` when registering the server:
+### Disabling semantic search
 
 ```bash
-claude mcp add memtrace \
-  --env MEMTRACE_EMBED_KEY=sk-... \
-  --env MEMTRACE_EMBED_MODEL=text-embedding-3-small \
-  memtrace serve
-```
-
-Or edit `.claude/mcp.json` directly:
-
-```json
-{
-  "mcpServers": {
-    "memtrace": {
-      "command": "memtrace",
-      "args": ["serve"],
-      "env": {
-        "MEMTRACE_EMBED_KEY": "sk-...",
-        "MEMTRACE_EMBED_MODEL": "text-embedding-3-small"
-      }
-    }
-  }
-}
-```
-
-#### Cursor
-
-Add an `env` block to `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "memtrace": {
-      "command": "memtrace",
-      "args": ["serve"],
-      "env": {
-        "MEMTRACE_EMBED_KEY": "sk-...",
-        "MEMTRACE_EMBED_MODEL": "text-embedding-3-small"
-      }
-    }
-  }
-}
-```
-
-#### Local Ollama
-
-```json
-"env": {
-  "MEMTRACE_EMBED_KEY": "ollama",
-  "MEMTRACE_EMBED_URL": "http://localhost:11434/v1",
-  "MEMTRACE_EMBED_MODEL": "nomic-embed-text"
-}
+memtrace config set embed.provider disabled
+# or: MEMTRACE_EMBED_PROVIDER=disabled
 ```
 
 ### Environment variables
@@ -309,9 +314,10 @@ Environment variables override config file values.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MEMTRACE_EMBED_KEY` | — | API key. Falls back to `OPENAI_API_KEY`. **Required** to enable. |
+| `MEMTRACE_EMBED_KEY` | — | API key. Falls back to `OPENAI_API_KEY`. |
 | `MEMTRACE_EMBED_URL` | `https://api.openai.com/v1` | Base URL of the embeddings API. |
 | `MEMTRACE_EMBED_MODEL` | `text-embedding-3-small` | Model name. |
+| `MEMTRACE_EMBED_PROVIDER` | `auto` | Set to `disabled` to turn off embeddings entirely. |
 
 ---
 

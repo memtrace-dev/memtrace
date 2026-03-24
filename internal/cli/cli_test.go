@@ -693,6 +693,8 @@ func TestReindexCmd_NoEmbedder(t *testing.T) {
 	)
 	t.Setenv("MEMTRACE_EMBED_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("MEMTRACE_EMBED_URL", "")
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
 
 	// Output goes to stderr for the "no embedder" message; runCmd captures stdout.
 	// We just verify the command exits without error and stdout is empty/benign.

@@ -47,16 +47,32 @@ func (k *MemoryKernel) Open() error {
 	k.store = NewStore(db)
 	k.pipeline = retrieval.New(k.store, k.projectID) // MemoryStore satisfies retrieval.StoreReader
 
-	// Wire up optional embedder. Env vars take precedence; config file is the fallback.
+	// Wire up optional embedder.
+	// Priority: env vars > config file > Ollama auto-detect.
 	cfg := util.GetProjectConfig()
-	if e := embedding.NewClient(
-		firstNonEmpty(os.Getenv("MEMTRACE_EMBED_KEY"), os.Getenv("OPENAI_API_KEY"), cfg.Embed.Key),
-		"",
-		firstNonEmpty(os.Getenv("MEMTRACE_EMBED_URL"), cfg.Embed.URL),
-		firstNonEmpty(os.Getenv("MEMTRACE_EMBED_MODEL"), cfg.Embed.Model),
-	); e != nil {
-		k.embedder = e
-		k.pipeline.WithEmbedder(e)
+	providerOverride := firstNonEmpty(os.Getenv("MEMTRACE_EMBED_PROVIDER"), cfg.Embed.Provider)
+	if providerOverride != "disabled" {
+		key := firstNonEmpty(os.Getenv("MEMTRACE_EMBED_KEY"), os.Getenv("OPENAI_API_KEY"), cfg.Embed.Key)
+		url := firstNonEmpty(os.Getenv("MEMTRACE_EMBED_URL"), cfg.Embed.URL)
+		model := firstNonEmpty(os.Getenv("MEMTRACE_EMBED_MODEL"), cfg.Embed.Model)
+
+		// Use *Client as intermediate to avoid the interface-wrapping-nil-pointer bug.
+		var ec *embedding.Client
+		switch {
+		case key != "":
+			// Authenticated endpoint (OpenAI or custom with key)
+			ec = embedding.NewClient(key, "", url, model)
+		case url != "":
+			// Local endpoint configured without a key (Ollama, llama.cpp, etc.)
+			ec = embedding.NewLocalClient(url, model)
+		default:
+			// Auto-detect: probe Ollama on localhost
+			ec = embedding.ProbeOllama()
+		}
+		if ec != nil {
+			k.embedder = ec
+			k.pipeline.WithEmbedder(ec)
+		}
 	}
 	return nil
 }
@@ -182,6 +198,22 @@ func (k *MemoryKernel) Recall(input types.MemoryRecallInput) ([]types.ScoredMemo
 // HasEmbedder reports whether an embedding client is configured.
 func (k *MemoryKernel) HasEmbedder() bool {
 	return k.embedder != nil
+}
+
+// EmbedInfo returns the provider label and model name for the active embedder.
+// Returns ("disabled", "") when no embedder is configured.
+func (k *MemoryKernel) EmbedInfo() (provider, model string) {
+	if k.embedder == nil {
+		return "disabled", ""
+	}
+	type infoer interface {
+		Provider() string
+		Model() string
+	}
+	if i, ok := k.embedder.(infoer); ok {
+		return i.Provider(), i.Model()
+	}
+	return "enabled", ""
 }
 
 // ReindexResult holds the outcome of a Reindex run.
