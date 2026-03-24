@@ -1,6 +1,9 @@
-# memtrace
+<p align="left">
+  <img src="logo.svg" alt="memtrace" width="180" />
+</p>
 
-Persistent, searchable memory for AI coding agents — local, fast, zero-config.
+# memtrace
+[memtrace.sh](https://memtrace.sh) · Persistent, searchable memory for AI coding agents — local, fast, zero-config.
 
 Memtrace gives Claude Code, Cursor, Windsurf, and any MCP-compatible agent a memory that survives every new session. Decisions, conventions, and codebase knowledge are there the next time you open a chat.
 
