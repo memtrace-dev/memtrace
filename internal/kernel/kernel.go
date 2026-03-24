@@ -105,6 +105,9 @@ func (k *MemoryKernel) Save(input types.MemorySaveInput) (*types.Memory, error) 
 	if input.Tags == nil {
 		input.Tags = []string{}
 	}
+	// Strip <private>...</private> blocks before anything touches the content.
+	input.Content = util.StripPrivate(input.Content)
+
 	if input.Summary == "" && input.Content != "" {
 		input.Summary = truncate(input.Content, 120)
 	}
