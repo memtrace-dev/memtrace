@@ -237,6 +237,7 @@ memtrace doctor
 memtrace config  get
 memtrace config  set <key> <value>
 memtrace config  unset <key>
+memtrace stats   [--days 7] [--json]
 ```
 
 ---

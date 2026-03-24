@@ -197,6 +197,43 @@ func (s *MemoryStore) Count(memType types.MemoryType, status types.MemoryStatus)
 	return n, err
 }
 
+// CountSince returns the number of active memories whose column (created_at or
+// accessed_at) is >= since. Only "created_at" and "accessed_at" are accepted.
+func (s *MemoryStore) CountSince(column string, since time.Time) (int, error) {
+	if column != "created_at" && column != "accessed_at" {
+		return 0, fmt.Errorf("invalid column: %s", column)
+	}
+	var n int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM memories WHERE status = 'active' AND "+column+" >= ?",
+		since.Format(time.RFC3339Nano),
+	).Scan(&n)
+	return n, err
+}
+
+// TopAccessed returns the top n active memories ordered by access_count desc.
+func (s *MemoryStore) TopAccessed(projectID string, n int) ([]types.Memory, error) {
+	rows, err := s.db.Query(`
+		SELECT * FROM memories
+		WHERE project_id = ? AND status = 'active' AND access_count > 0
+		ORDER BY access_count DESC
+		LIMIT ?
+	`, projectID, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []types.Memory
+	for rows.Next() {
+		m, err := scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *m)
+	}
+	return result, rows.Err()
+}
+
 // SearchFTS runs a full-text search and returns matching row IDs with BM25 ranks.
 // Returns up to limit results. Caller should fetch 3x the final desired limit.
 func (s *MemoryStore) SearchFTS(query string, projectID string, limit int) ([]types.FTSResult, error) {

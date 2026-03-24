@@ -426,6 +426,68 @@ func filePathsToQuery(paths []string) string {
 	return strings.Join(terms, " ")
 }
 
+// StatsResult holds usage metrics for the memory store.
+type StatsResult struct {
+	TotalActive     int
+	SavedThisWeek   int
+	RecallsThisWeek int
+	SessionsThisWeek int
+	TopAccessed     []types.Memory
+}
+
+// Stats returns usage metrics over the last window duration.
+func (k *MemoryKernel) Stats(window time.Duration) (StatsResult, error) {
+	since := time.Now().UTC().Add(-window)
+
+	total, err := k.store.Count("", types.MemoryStatusActive)
+	if err != nil {
+		return StatsResult{}, err
+	}
+
+	saved, err := k.store.CountSince("created_at", since)
+	if err != nil {
+		return StatsResult{}, err
+	}
+
+	recalls, err := k.store.CountSince("accessed_at", since)
+	if err != nil {
+		return StatsResult{}, err
+	}
+
+	// Sessions are event memories tagged "session"
+	sessions, err := k.store.List(types.ListOptions{
+		Type:   types.MemoryTypeEvent,
+		Status: types.MemoryStatusActive,
+		Sort:   "created_at",
+		Limit:  1000,
+	})
+	if err != nil {
+		return StatsResult{}, err
+	}
+	sessionCount := 0
+	for _, m := range sessions {
+		for _, tag := range m.Tags {
+			if tag == "session" && m.CreatedAt.After(since) {
+				sessionCount++
+				break
+			}
+		}
+	}
+
+	top, err := k.store.TopAccessed(k.projectID, 5)
+	if err != nil {
+		return StatsResult{}, err
+	}
+
+	return StatsResult{
+		TotalActive:      total,
+		SavedThisWeek:    saved,
+		RecallsThisWeek:  recalls,
+		SessionsThisWeek: sessionCount,
+		TopAccessed:      top,
+	}, nil
+}
+
 // stalenessReason returns a non-empty string describing why m is stale, or ""
 // if all referenced files are present and unmodified since m.UpdatedAt.
 func stalenessReason(projectRoot string, m *types.Memory) string {

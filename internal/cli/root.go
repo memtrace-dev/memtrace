@@ -33,6 +33,7 @@ func NewRootCmd(version ...string) *cobra.Command {
 		newDoctorCmd(),
 		newLinkCmd(),
 		newConfigCmd(),
+		newStatsCmd(),
 	)
 
 	return root

@@ -896,3 +896,62 @@ func TestDoctorCmd_MissingCLAUDEMD(t *testing.T) {
 		t.Errorf("expected CLAUDE.md warning, got: %s", out)
 	}
 }
+
+// --- stats ---
+
+func TestStatsCmd_Basic(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "We use JWT", Type: types.MemoryTypeDecision},
+		types.MemorySaveInput{Content: "Error handling convention", Type: types.MemoryTypeConvention},
+	)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
+
+	out, err := runCmd(t, "stats")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Total active memories") {
+		t.Errorf("expected 'Total active memories', got: %s", out)
+	}
+	if !strings.Contains(out, "Saved this period") {
+		t.Errorf("expected 'Saved this period', got: %s", out)
+	}
+	if !strings.Contains(out, "Recalls this period") {
+		t.Errorf("expected 'Recalls this period', got: %s", out)
+	}
+}
+
+func TestStatsCmd_JSON(t *testing.T) {
+	setupProject(t,
+		types.MemorySaveInput{Content: "We use PostgreSQL", Type: types.MemoryTypeFact},
+	)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
+
+	out, err := runCmd(t, "stats", "--json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+	}
+	if _, ok := result["total_active"]; !ok {
+		t.Errorf("expected 'total_active' in JSON, got: %s", out)
+	}
+	if _, ok := result["recalls_this_period"]; !ok {
+		t.Errorf("expected 'recalls_this_period' in JSON, got: %s", out)
+	}
+}
+
+func TestStatsCmd_CustomDays(t *testing.T) {
+	setupProject(t)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
+
+	out, err := runCmd(t, "stats", "--days", "30")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "last 30 days") {
+		t.Errorf("expected 'last 30 days', got: %s", out)
+	}
+}
