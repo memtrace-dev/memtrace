@@ -225,8 +225,8 @@ memtrace edit    <id|prefix>
 memtrace search  <query> [--limit 10] [--type decision] [--json]
 memtrace list    [--limit 20] [--type convention] [--status active] [--json]
 memtrace rm      <id|prefix>
-memtrace export  [--output memories.json] [--type decision] [--status active]
-memtrace import  <file|url> [--type decision] [--dry-run]
+memtrace export  [--output memories.json] [--format json|markdown] [--type decision] [--status active]
+memtrace import  <file|url> [--format json|markdown] [--type decision] [--dry-run]
 memtrace browse
 memtrace serve   [--dir <path>]
 memtrace status  [--json]
@@ -389,6 +389,39 @@ memtrace link --dry-run src/auth/*.go
 ```
 
 Linked memories are tagged with `symbol`, the kind (`function`, `struct`, ...), and the language (`go`, `typescript`, ...). They are also linked to the source file path, so `memory_context` and `memtrace scan` pick them up automatically.
+
+---
+
+## Export and import
+
+`memtrace export` dumps all memories to JSON (default) or Markdown. `memtrace import` loads them back from either format.
+
+```bash
+# Export to Markdown — human-readable, easy to edit
+memtrace export --format markdown --output memories.md
+
+# Export filtered subset to JSON
+memtrace export --format json --type decision --output decisions.json
+
+# Import from Markdown (auto-detected by .md extension)
+memtrace import memories.md
+
+# Import from JSON with a dry run preview
+memtrace import decisions.json --dry-run
+```
+
+The Markdown format uses `## [type] first line` headings with a metadata list block, separated by `---`. It is designed to be readable as-is and editable by hand before reimporting.
+
+```markdown
+## [decision] We use JWT with RS256 — stateless API, no session storage
+
+- Tags: auth, security
+- Confidence: 1.00
+- Created: 2026-03-22T10:00:00Z
+- Files: src/middleware/auth.go
+
+We use JWT with RS256 for authentication. The API is stateless — no session storage anywhere.
+```
 
 ---
 
