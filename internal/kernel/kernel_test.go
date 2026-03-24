@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/memtrace-dev/memtrace/internal/types"
 )
@@ -370,5 +372,113 @@ func TestKernel_Count(t *testing.T) {
 	}
 	if n != 2 {
 		t.Errorf("want 2, got %d", n)
+	}
+}
+
+// --- ScanStaleness ---
+
+func TestScanStaleness_NoFilePaths(t *testing.T) {
+	k := setupTestKernel(t)
+	k.Save(types.MemorySaveInput{Content: "no file paths"})
+
+	res, err := k.ScanStaleness(t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Checked != 0 {
+		t.Errorf("want Checked=0 (no file_paths), got %d", res.Checked)
+	}
+	if res.Marked != 0 {
+		t.Errorf("want Marked=0, got %d", res.Marked)
+	}
+}
+
+func TestScanStaleness_FileDeleted(t *testing.T) {
+	dir := t.TempDir()
+	k := setupTestKernel(t)
+
+	// Save a memory referencing a file that doesn't exist.
+	k.Save(types.MemorySaveInput{
+		Content:   "auth uses RS256",
+		FilePaths: []string{"src/auth.go"},
+	})
+
+	res, err := k.ScanStaleness(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Checked != 1 {
+		t.Errorf("want Checked=1, got %d", res.Checked)
+	}
+	if res.Marked != 1 {
+		t.Errorf("want Marked=1 (file missing), got %d", res.Marked)
+	}
+	if len(res.Details) == 0 || res.Details[0].Reason != "file deleted: src/auth.go" {
+		t.Errorf("unexpected detail: %+v", res.Details)
+	}
+
+	// Memory should now be stale in the DB.
+	mem, _ := k.Get(res.Details[0].MemoryID)
+	if mem.Status != types.MemoryStatusStale {
+		t.Errorf("expected status=stale, got %s", mem.Status)
+	}
+}
+
+func TestScanStaleness_FileModified(t *testing.T) {
+	dir := t.TempDir()
+	k := setupTestKernel(t)
+
+	// Create the file first, then save the memory (memory.UpdatedAt > file mtime).
+	filePath := filepath.Join(dir, "src", "db.go")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filePath, []byte("// original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mem, _ := k.Save(types.MemorySaveInput{
+		Content:   "database uses postgres",
+		FilePaths: []string{"src/db.go"},
+	})
+
+	// Touch the file after saving the memory.
+	futureTime := mem.UpdatedAt.Add(2 * time.Second)
+	if err := os.Chtimes(filePath, futureTime, futureTime); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := k.ScanStaleness(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Marked != 1 {
+		t.Errorf("want Marked=1 (file modified after memory saved), got %d", res.Marked)
+	}
+}
+
+func TestScanStaleness_FileUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	k := setupTestKernel(t)
+
+	// Write file, then save memory — memory.UpdatedAt is after file mtime.
+	filePath := filepath.Join(dir, "README.md")
+	if err := os.WriteFile(filePath, []byte("# readme"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Small sleep so memory timestamp is clearly after file write.
+	time.Sleep(5 * time.Millisecond)
+	k.Save(types.MemorySaveInput{
+		Content:   "see README for setup",
+		FilePaths: []string{"README.md"},
+	})
+
+	res, err := k.ScanStaleness(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Marked != 0 {
+		t.Errorf("want Marked=0 (file unchanged), got %d", res.Marked)
 	}
 }

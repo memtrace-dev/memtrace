@@ -23,6 +23,7 @@ func NewRootCmd() *cobra.Command {
 		newServeCmd(),
 		newStatusCmd(),
 		newReindexCmd(),
+		newScanCmd(),
 		newConfigCmd(),
 	)
 

@@ -86,8 +86,15 @@ func newStatusCmd() *cobra.Command {
 				}
 			}
 			fmt.Println()
-			fmt.Printf("Status:    %d active, %d stale, %d archived\n",
-				statusCounts["active"], statusCounts["stale"], statusCounts["archived"])
+			staleCount := statusCounts["stale"]
+			if staleCount > 0 {
+				color.New(color.FgYellow).Printf("Status:    %d active, %d stale, %d archived\n",
+					statusCounts["active"], staleCount, statusCounts["archived"])
+				dim.Printf("           run 'memtrace list --status stale' to review\n")
+			} else {
+				fmt.Printf("Status:    %d active, %d stale, %d archived\n",
+					statusCounts["active"], staleCount, statusCounts["archived"])
+			}
 
 			fmt.Println()
 			if embedProvider == "disabled" {

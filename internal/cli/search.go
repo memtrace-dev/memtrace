@@ -67,7 +67,11 @@ func printMemoryRow(idx int, m *types.Memory, dim *color.Color) {
 		shortID = shortID[:12]
 	}
 	fmt.Printf("[%d] %s  ", idx, typeColor.Sprint(fmt.Sprintf("%s", m.Type)))
-	dim.Printf("%s\n", shortID)
+	dim.Printf("%s", shortID)
+	if m.Status == types.MemoryStatusStale {
+		color.New(color.FgYellow).Printf("  [stale]")
+	}
+	fmt.Println()
 	fmt.Printf("    %s\n", m.Content)
 	meta := []string{}
 	if len(m.Tags) > 0 {

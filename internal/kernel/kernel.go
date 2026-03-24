@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/memtrace-dev/memtrace/internal/embedding"
@@ -261,6 +262,79 @@ func (k *MemoryKernel) Reindex(progress func(done, total int)) (ReindexResult, e
 // Store returns the underlying store (used by the retrieval pipeline).
 func (k *MemoryKernel) Store() *MemoryStore {
 	return k.store
+}
+
+// StaleDetail describes a single memory that was marked stale during a scan.
+type StaleDetail struct {
+	MemoryID string
+	Summary  string
+	Reason   string // e.g. "file deleted: src/auth.go" or "file modified: src/auth.go"
+}
+
+// ScanResult holds the outcome of a ScanStaleness run.
+type ScanResult struct {
+	Checked int           // active memories with file_paths that were examined
+	Marked  int           // memories newly marked as stale
+	Details []StaleDetail // one entry per newly-stale memory
+}
+
+// ScanStaleness checks every active memory that references file_paths.
+// A memory is marked stale when any of its referenced files has been deleted
+// or modified more recently than the memory was last updated.
+// projectRoot is the absolute path to the project directory (file_paths are relative to it).
+func (k *MemoryKernel) ScanStaleness(projectRoot string) (ScanResult, error) {
+	memories, err := k.store.List(types.ListOptions{
+		Status: types.MemoryStatusActive,
+		Limit:  10000,
+	})
+	if err != nil {
+		return ScanResult{}, fmt.Errorf("listing memories: %w", err)
+	}
+
+	var res ScanResult
+	for i := range memories {
+		m := &memories[i]
+		if len(m.FilePaths) == 0 {
+			continue
+		}
+		res.Checked++
+
+		reason := stalenessReason(projectRoot, m)
+		if reason == "" {
+			continue
+		}
+
+		stale := types.MemoryStatusStale
+		if err := k.store.Update(m.ID, types.MemoryUpdateInput{Status: &stale}); err != nil {
+			return res, fmt.Errorf("marking %s stale: %w", m.ID[:8], err)
+		}
+		res.Marked++
+		res.Details = append(res.Details, StaleDetail{
+			MemoryID: m.ID,
+			Summary:  truncate(m.Content, 60),
+			Reason:   reason,
+		})
+	}
+	return res, nil
+}
+
+// stalenessReason returns a non-empty string describing why m is stale, or ""
+// if all referenced files are present and unmodified since m.UpdatedAt.
+func stalenessReason(projectRoot string, m *types.Memory) string {
+	for _, rel := range m.FilePaths {
+		abs := filepath.Join(projectRoot, rel)
+		info, err := os.Stat(abs)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "file deleted: " + rel
+			}
+			continue // stat error — skip rather than false-positive
+		}
+		if info.ModTime().After(m.UpdatedAt) {
+			return "file modified: " + rel
+		}
+	}
+	return ""
 }
 
 // firstNonEmpty returns the first non-empty string from the arguments.
