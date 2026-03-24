@@ -221,6 +221,7 @@ memtrace serve   [--dir <path>]
 memtrace status  [--json]
 memtrace reindex
 memtrace scan
+memtrace doctor
 memtrace config  get
 memtrace config  set <key> <value>
 memtrace config  unset <key>
@@ -332,6 +333,25 @@ Environment variables override config file values.
 | `MEMTRACE_EMBED_URL` | `https://api.openai.com/v1` | Base URL of the embeddings API. |
 | `MEMTRACE_EMBED_MODEL` | `text-embedding-3-small` | Model name. |
 | `MEMTRACE_EMBED_PROVIDER` | `auto` | Set to `disabled` to turn off embeddings entirely. |
+
+---
+
+## Diagnostics
+
+`memtrace doctor` runs a series of health checks and reports any issues:
+
+```
+  [ok]   Database:          .memtrace/memtrace.db (24 KB, 42 memories)
+  [ok]   Stale memories:    none
+  [ok]   Embeddings:        ollama (nomic-embed-text)
+  [ok]   Unembedded:        all memories indexed
+ [warn]  MCP config:        memtrace not found in any MCP config — run 'claude mcp add memtrace memtrace serve'
+  [ok]   CLAUDE.md:         memtrace instructions present
+
+1 issue found.
+```
+
+Checks: database health, stale memories, embedding configuration, unindexed memories, MCP wiring, CLAUDE.md instructions.
 
 ---
 

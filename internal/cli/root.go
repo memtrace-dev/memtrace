@@ -24,6 +24,7 @@ func NewRootCmd() *cobra.Command {
 		newStatusCmd(),
 		newReindexCmd(),
 		newScanCmd(),
+		newDoctorCmd(),
 		newConfigCmd(),
 	)
 

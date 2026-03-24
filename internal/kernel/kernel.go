@@ -197,6 +197,15 @@ func (k *MemoryKernel) Recall(input types.MemoryRecallInput) ([]types.ScoredMemo
 	return results, nil
 }
 
+// UnembeddedCount returns the number of active memories with no stored embedding.
+func (k *MemoryKernel) UnembeddedCount() (int, error) {
+	rows, err := k.store.FindUnembedded(k.projectID)
+	if err != nil {
+		return 0, err
+	}
+	return len(rows), nil
+}
+
 // HasEmbedder reports whether an embedding client is configured.
 func (k *MemoryKernel) HasEmbedder() bool {
 	return k.embedder != nil

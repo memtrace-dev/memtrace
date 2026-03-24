@@ -736,3 +736,100 @@ func TestReindexCmd_WithEmbedder(t *testing.T) {
 		t.Errorf("expected 'Reindexed' in output, got: %s", out)
 	}
 }
+
+// --- doctor ---
+
+func TestDoctorCmd_AllOK(t *testing.T) {
+	_, root := setupProject(t,
+		types.MemorySaveInput{Content: "We use JWT", Type: types.MemoryTypeDecision},
+	)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
+
+	// Write a CLAUDE.md with memtrace instructions.
+	os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("Use memory_save to store decisions."), 0644)
+	// Write a .claude/mcp.json referencing memtrace.
+	os.MkdirAll(filepath.Join(root, ".claude"), 0755)
+	os.WriteFile(filepath.Join(root, ".claude", "mcp.json"), []byte(`{"mcpServers":{"memtrace":{"command":"memtrace","args":["serve"]}}}`), 0644)
+
+	out, err := runCmd(t, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "[ok]") {
+		t.Errorf("expected [ok] checks, got: %s", out)
+	}
+	if strings.Contains(out, "[warn]") || strings.Contains(out, "[fail]") {
+		t.Errorf("expected no warnings or failures, got: %s", out)
+	}
+	if !strings.Contains(out, "Everything looks good") {
+		t.Errorf("expected success summary, got: %s", out)
+	}
+}
+
+func TestDoctorCmd_StaleWarning(t *testing.T) {
+	_, root := setupProject(t)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
+
+	// Write CLAUDE.md and MCP config to avoid those warnings.
+	os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("memory_save"), 0644)
+	os.MkdirAll(filepath.Join(root, ".claude"), 0755)
+	os.WriteFile(filepath.Join(root, ".claude", "mcp.json"), []byte(`{"mcpServers":{"memtrace":{}}}`), 0644)
+
+	// Create a memory referencing a file, then delete the file so scan marks it stale.
+	tmpFile := filepath.Join(root, "tmp.go")
+	os.WriteFile(tmpFile, []byte("package main"), 0644)
+	k, _, _ := func() (*kernel.MemoryKernel, string, error) {
+		orig, _ := os.Getwd()
+		os.Chdir(root)
+		defer os.Chdir(orig)
+		return openKernel()
+	}()
+	if k != nil {
+		k.Save(types.MemorySaveInput{
+			Content:   "Temp file convention",
+			FilePaths: []string{"tmp.go"},
+		})
+		os.Remove(tmpFile)
+		k.ScanStaleness(root)
+		k.Close()
+	}
+
+	out, err := runCmd(t, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Stale") {
+		t.Errorf("expected stale warning, got: %s", out)
+	}
+}
+
+func TestDoctorCmd_MissingMCPConfig(t *testing.T) {
+	_, root := setupProject(t)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
+	os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("memory_save"), 0644)
+	// No MCP config files.
+
+	out, err := runCmd(t, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "MCP config") {
+		t.Errorf("expected MCP config warning, got: %s", out)
+	}
+}
+
+func TestDoctorCmd_MissingCLAUDEMD(t *testing.T) {
+	_, root := setupProject(t)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "disabled")
+	os.MkdirAll(filepath.Join(root, ".claude"), 0755)
+	os.WriteFile(filepath.Join(root, ".claude", "mcp.json"), []byte(`{"mcpServers":{"memtrace":{}}}`), 0644)
+	// No CLAUDE.md.
+
+	out, err := runCmd(t, "doctor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "CLAUDE.md") {
+		t.Errorf("expected CLAUDE.md warning, got: %s", out)
+	}
+}
