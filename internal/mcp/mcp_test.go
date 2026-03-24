@@ -262,9 +262,9 @@ func TestMemoryRecallTool_LimitRespected(t *testing.T) {
 		"limit": float64(3),
 	})
 	text := resultText(t, result)
-	// The output lists memories as [1], [2], ... — check [4] is absent
-	if strings.Contains(text, "[4]") {
-		t.Errorf("limit=3 should not return a 4th result; got: %s", text)
+	// Each result has exactly one "confidence:" line
+	if got := strings.Count(text, "confidence:"); got != 3 {
+		t.Errorf("limit=3 should return exactly 3 results, got %d; text: %s", got, text)
 	}
 }
 
@@ -564,6 +564,142 @@ func TestSessionTracker_SaveTool_RecordsInTracker(t *testing.T) {
 	}
 	if !strings.Contains(sum, "Test decision") {
 		t.Errorf("expected memory content in summary, got: %s", sum)
+	}
+}
+
+// --- memory_get tool ---
+
+func TestMemoryGetTool_ReturnsFullContent(t *testing.T) {
+	s, k := setupServer(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{
+		Content: "We use JWT with RS256 for authentication. The API is stateless — no session storage.",
+		Type:    types.MemoryTypeDecision,
+		Tags:    []string{"auth"},
+	})
+
+	result := callTool(t, s, "memory_get", map[string]interface{}{
+		"id": mem.ID,
+	})
+	text := resultText(t, result)
+
+	if !strings.Contains(text, mem.ID) {
+		t.Errorf("expected ID in output, got: %s", text)
+	}
+	if !strings.Contains(text, "stateless") {
+		t.Errorf("expected full content, got: %s", text)
+	}
+	if !strings.Contains(text, "auth") {
+		t.Errorf("expected tags in output, got: %s", text)
+	}
+}
+
+func TestMemoryGetTool_NotFound(t *testing.T) {
+	s, _ := setupServer(t)
+
+	result := callTool(t, s, "memory_get", map[string]interface{}{
+		"id": "01NONEXISTENTID0000000000X",
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "not found") {
+		t.Errorf("expected not-found message, got: %s", text)
+	}
+}
+
+func TestMemoryGetTool_MissingID(t *testing.T) {
+	s, _ := setupServer(t)
+
+	result := callTool(t, s, "memory_get", map[string]interface{}{})
+	if !result.IsError {
+		t.Error("expected error when id is missing")
+	}
+}
+
+// --- memory_recall output format ---
+
+func TestMemoryRecallTool_ShowsIDsForMemoryGet(t *testing.T) {
+	s, k := setupServer(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{Content: "We use Redis for caching"})
+
+	result := callTool(t, s, "memory_recall", map[string]interface{}{
+		"query": "Redis caching",
+	})
+	text := resultText(t, result)
+
+	if !strings.Contains(text, mem.ID) {
+		t.Errorf("expected memory ID %s in recall output for memory_get, got: %s", mem.ID, text)
+	}
+}
+
+func TestMemoryRecallTool_IncludesMemoryGetHint(t *testing.T) {
+	s, k := setupServer(t)
+
+	k.Save(types.MemorySaveInput{Content: "some fact about the project"})
+
+	result := callTool(t, s, "memory_recall", map[string]interface{}{
+		"query": "project fact",
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "memory_get") {
+		t.Errorf("expected memory_get hint in recall output, got: %s", text)
+	}
+}
+
+func TestMemoryRecallTool_UsesSummaryNotFullContent(t *testing.T) {
+	s, k := setupServer(t)
+
+	// Build content where the unique marker is beyond the 120-char summary boundary
+	prefix := "Start of memory. " + strings.Repeat("padding ", 15) // >120 chars
+	marker := "BEYOND_SUMMARY_MARKER"
+	longContent := prefix + marker
+	k.Save(types.MemorySaveInput{Content: longContent})
+
+	result := callTool(t, s, "memory_recall", map[string]interface{}{
+		"query": "start memory padding",
+	})
+	text := resultText(t, result)
+
+	if !strings.Contains(text, "Start of memory") {
+		t.Errorf("expected summary start in recall, got: %s", text)
+	}
+	// The marker is beyond position 120 so it must not appear in the recall output
+	if strings.Contains(text, marker) {
+		t.Errorf("full content beyond summary should not appear in recall, got: %s", text)
+	}
+}
+
+func TestMemoryContextTool_IncludesMemoryGetHint(t *testing.T) {
+	s, k := setupServer(t)
+
+	k.Save(types.MemorySaveInput{
+		Content:   "Auth middleware validates JWT",
+		FilePaths: []string{"src/auth/middleware.go"},
+	})
+
+	result := callTool(t, s, "memory_context", map[string]interface{}{
+		"file_paths": []interface{}{"src/auth/middleware.go"},
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "memory_get") {
+		t.Errorf("expected memory_get hint in context output, got: %s", text)
+	}
+}
+
+func TestMemoryContextTool_ShowsIDsForMemoryGet(t *testing.T) {
+	s, k := setupServer(t)
+
+	mem, _ := k.Save(types.MemorySaveInput{
+		Content:   "Auth middleware validates JWT tokens",
+		FilePaths: []string{"src/auth/middleware.go"},
+	})
+
+	result := callTool(t, s, "memory_context", map[string]interface{}{
+		"file_paths": []interface{}{"src/auth/middleware.go"},
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, mem.ID) {
+		t.Errorf("expected memory ID %s in context output, got: %s", mem.ID, text)
 	}
 }
 

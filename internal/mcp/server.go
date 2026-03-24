@@ -84,7 +84,7 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel, tracker *session
 	// Tool 2: memory_recall
 	s.AddTool(
 		mcp.NewTool("memory_recall",
-			mcp.WithDescription("Search the memory store for relevant past memories. Use this at the start of tasks and when you need project context, conventions, or past decisions."),
+			mcp.WithDescription("Search the memory store for relevant past memories. Returns summaries — call memory_get(id) to read the full content of any result. Use this at the start of tasks and when you need project context, conventions, or past decisions."),
 			mcp.WithString("query",
 				mcp.Required(),
 				mcp.Description(`Natural language search query, e.g. "authentication approach" or "database conventions"`),
@@ -122,18 +122,58 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel, tracker *session
 			fmt.Fprintf(&buf, "Found %d memories:\n\n", len(results))
 			for i, r := range results {
 				m := r.Memory
-				fmt.Fprintf(&buf, "[%d] (%s, %s, confidence: %.1f) %s",
-					i+1, m.Type, formatAge(m.CreatedAt), m.Confidence, m.Content)
+				fmt.Fprintf(&buf, "[%s] %s · %s · confidence: %.1f\n%s",
+					m.ID, m.Type, formatAge(m.CreatedAt), m.Confidence, m.Summary)
 				if len(m.Tags) > 0 {
-					fmt.Fprintf(&buf, "\n   tags: %s", strings.Join(m.Tags, ", "))
+					fmt.Fprintf(&buf, "\ntags: %s", strings.Join(m.Tags, ", "))
 				}
 				if len(m.FilePaths) > 0 {
-					fmt.Fprintf(&buf, "\n   files: %s", strings.Join(m.FilePaths, ", "))
+					fmt.Fprintf(&buf, "\nfiles: %s", strings.Join(m.FilePaths, ", "))
 				}
 				if i < len(results)-1 {
 					buf.WriteString("\n\n")
 				}
 			}
+			buf.WriteString("\n\nCall memory_get with an ID to read the full content.")
+			return mcp.NewToolResultText(buf.String()), nil
+		},
+	)
+
+	// Tool 2b: memory_get
+	s.AddTool(
+		mcp.NewTool("memory_get",
+			mcp.WithDescription("Retrieve the full content of a memory by ID. Use this after memory_recall or memory_context to read the complete text of a specific memory."),
+			mcp.WithString("id",
+				mcp.Required(),
+				mcp.Description("The memory ID to retrieve"),
+			),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			id, _ := args["id"].(string)
+			if id == "" {
+				return mcp.NewToolResultError("id is required"), nil
+			}
+
+			mem, err := k.Get(id)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if mem == nil {
+				return mcp.NewToolResultText(fmt.Sprintf("Memory %s not found.", id)), nil
+			}
+
+			var buf strings.Builder
+			fmt.Fprintf(&buf, "[%s] %s · %s · confidence: %.1f\n",
+				mem.ID, mem.Type, formatAge(mem.CreatedAt), mem.Confidence)
+			if len(mem.Tags) > 0 {
+				fmt.Fprintf(&buf, "tags: %s\n", strings.Join(mem.Tags, ", "))
+			}
+			if len(mem.FilePaths) > 0 {
+				fmt.Fprintf(&buf, "files: %s\n", strings.Join(mem.FilePaths, ", "))
+			}
+			buf.WriteString("\n")
+			buf.WriteString(mem.Content)
 			return mcp.NewToolResultText(buf.String()), nil
 		},
 	)
@@ -295,18 +335,19 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel, tracker *session
 				if r.Score >= 1.0 {
 					label = "file match"
 				}
-				fmt.Fprintf(&buf, "[%s] (%s, %s, confidence: %.1f) %s",
-					label, m.Type, formatAge(m.CreatedAt), m.Confidence, m.Content)
+				fmt.Fprintf(&buf, "[%s] %s · %s · %s · confidence: %.1f\n%s",
+					m.ID, label, m.Type, formatAge(m.CreatedAt), m.Confidence, m.Summary)
 				if len(m.Tags) > 0 {
-					fmt.Fprintf(&buf, "\n   tags: %s", strings.Join(m.Tags, ", "))
+					fmt.Fprintf(&buf, "\ntags: %s", strings.Join(m.Tags, ", "))
 				}
 				if len(m.FilePaths) > 0 {
-					fmt.Fprintf(&buf, "\n   files: %s", strings.Join(m.FilePaths, ", "))
+					fmt.Fprintf(&buf, "\nfiles: %s", strings.Join(m.FilePaths, ", "))
 				}
 				if i < len(results)-1 {
 					buf.WriteString("\n\n")
 				}
 			}
+			buf.WriteString("\n\nCall memory_get with an ID to read the full content.")
 			return mcp.NewToolResultText(buf.String()), nil
 		},
 	)

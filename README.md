@@ -79,7 +79,7 @@ memtrace setup
 # 3. Start a new Claude Code session — memory is live
 ```
 
-That's it. Your agent now has `memory_save`, `memory_recall`, `memory_forget`, `memory_update`, and `memory_context` available in every session.
+That's it. Your agent now has `memory_save`, `memory_recall`, `memory_get`, `memory_forget`, `memory_update`, and `memory_context` available in every session.
 
 ---
 
@@ -118,7 +118,7 @@ memory_save(
 
 ### `memory_recall`
 
-Search memories by natural language query.
+Search memories by natural language query. Returns summaries — call `memory_get` with an ID to read the full content of any result.
 
 ```
 memory_recall(
@@ -126,6 +126,14 @@ memory_recall(
   limit: 10,
   type:  "decision"   // optional filter
 )
+```
+
+### `memory_get`
+
+Retrieve the full content of a memory by ID.
+
+```
+memory_get(id: "01KMDX71NT...")
 ```
 
 ### `memory_forget`
