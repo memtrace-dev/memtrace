@@ -16,6 +16,11 @@ func TestNormalizeAgent(t *testing.T) {
 		{"vscode", "vscode"},
 		{"vs-code", "vscode"},
 		{"code", "vscode"},
+		{"opencode", "opencode"},
+		{"open-code", "opencode"},
+		{"windsurf", "windsurf"},
+		{"gemini", "gemini"},
+		{"gemini-cli", "gemini"},
 		{"unknown", "unknown"},
 	}
 	for _, c := range cases {
@@ -48,6 +53,24 @@ func TestDetectAgents_FindsExistingDirs(t *testing.T) {
 	}
 	if !found["claude-code"] || !found["cursor"] {
 		t.Errorf("expected claude-code and cursor, got %v", agents)
+	}
+}
+
+func TestDetectAgents_FindsOpencodeAndGemini(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte("{}"), 0644)
+	os.MkdirAll(filepath.Join(dir, ".gemini"), 0755)
+
+	agents := detectAgents(dir)
+	found := map[string]bool{}
+	for _, a := range agents {
+		found[a] = true
+	}
+	if !found["opencode"] {
+		t.Errorf("expected opencode to be detected, got %v", agents)
+	}
+	if !found["gemini"] {
+		t.Errorf("expected gemini to be detected, got %v", agents)
 	}
 }
 
@@ -180,8 +203,47 @@ func TestWriteMCPEntry_VSCodeFormat(t *testing.T) {
 	}
 }
 
+func TestSetupAgent_Opencode(t *testing.T) {
+	dir := t.TempDir()
+	wrote, err := setupAgent("opencode", dir, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wrote {
+		t.Error("expected wrote=true")
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	var cfg map[string]interface{}
+	json.Unmarshal(data, &cfg)
+	mcp := cfg["mcp"].(map[string]interface{})
+	entry := mcp["memtrace"].(map[string]interface{})
+	if entry["type"] != "local" {
+		t.Errorf("expected type=local, got %v", entry["type"])
+	}
+}
+
+func TestSetupAgent_Gemini(t *testing.T) {
+	dir := t.TempDir()
+	wrote, err := setupAgent("gemini", dir, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wrote {
+		t.Error("expected wrote=true")
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, ".gemini", "settings.json"))
+	var cfg map[string]interface{}
+	json.Unmarshal(data, &cfg)
+	servers := cfg["mcpServers"].(map[string]interface{})
+	if _, ok := servers["memtrace"]; !ok {
+		t.Error("memtrace entry not found in .gemini/settings.json")
+	}
+}
+
 func TestSetupAgent_UnknownAgent(t *testing.T) {
-	_, err := setupAgent("windsurfer", t.TempDir(), false)
+	_, err := setupAgent("notanagent", t.TempDir(), false)
 	if err == nil {
 		t.Error("expected error for unknown agent")
 	}

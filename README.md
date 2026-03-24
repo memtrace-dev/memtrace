@@ -88,10 +88,13 @@ That's it. Your agent now has `memory_save`, `memory_recall`, `memory_get`, `mem
 `memtrace setup` writes the MCP config for you — no manual JSON editing needed.
 
 ```bash
-memtrace setup              # auto-detect agents from .claude/, .cursor/, .vscode/
+memtrace setup              # auto-detect agents from .claude/, .cursor/, .vscode/, opencode.json, .gemini/
 memtrace setup claude-code  # Claude Code, project scope (.claude/mcp.json)
 memtrace setup cursor       # Cursor (.cursor/mcp.json)
 memtrace setup vscode       # VS Code (.vscode/mcp.json)
+memtrace setup opencode     # OpenCode (opencode.json)
+memtrace setup windsurf     # Windsurf (~/.codeium/windsurf/mcp_config.json)
+memtrace setup gemini       # Gemini CLI (.gemini/settings.json)
 memtrace setup --global     # Claude Code, user scope (~/.claude/mcp.json)
 ```
 

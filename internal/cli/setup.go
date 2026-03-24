@@ -22,10 +22,13 @@ Supported agents:
   claude-code   Writes to .claude/mcp.json (or ~/.claude/mcp.json with --global)
   cursor        Writes to .cursor/mcp.json
   vscode        Writes to .vscode/mcp.json
+  opencode      Writes to opencode.json (project root)
+  windsurf      Writes to ~/.codeium/windsurf/mcp_config.json
+  gemini        Writes to .gemini/settings.json
 
 If no agent is specified, memtrace auto-detects which agents are configured in the
-current directory (by checking for .claude/, .cursor/, and .vscode/ directories)
-and sets up all detected ones. Falls back to claude-code if none are detected.
+current directory and sets up all detected ones. Falls back to claude-code if none
+are detected.
 
 The command is idempotent — running it again is safe.`,
 		Args: cobra.MaximumNArgs(1),
@@ -63,6 +66,9 @@ The command is idempotent — running it again is safe.`,
 				fmt.Println("  memtrace setup claude-code")
 				fmt.Println("  memtrace setup cursor")
 				fmt.Println("  memtrace setup vscode")
+				fmt.Println("  memtrace setup opencode")
+				fmt.Println("  memtrace setup windsurf")
+				fmt.Println("  memtrace setup gemini")
 			}
 			return nil
 		},
@@ -80,6 +86,12 @@ func normalizeAgent(s string) string {
 		return "cursor"
 	case "vscode", "vs-code", "code":
 		return "vscode"
+	case "opencode", "open-code":
+		return "opencode"
+	case "windsurf":
+		return "windsurf"
+	case "gemini", "gemini-cli":
+		return "gemini"
 	default:
 		return s
 	}
@@ -88,15 +100,17 @@ func normalizeAgent(s string) string {
 func detectAgents(projectRoot string) []string {
 	var found []string
 	checks := []struct {
-		dir   string
+		path  string
 		agent string
 	}{
 		{".claude", "claude-code"},
 		{".cursor", "cursor"},
 		{".vscode", "vscode"},
+		{"opencode.json", "opencode"},
+		{".gemini", "gemini"},
 	}
 	for _, c := range checks {
-		if info, err := os.Stat(filepath.Join(projectRoot, c.dir)); err == nil && info.IsDir() {
+		if _, err := os.Stat(filepath.Join(projectRoot, c.path)); err == nil {
 			found = append(found, c.agent)
 		}
 	}
@@ -141,8 +155,33 @@ func setupAgent(agent, projectRoot string, global bool) (bool, error) {
 			"args":    []string{"serve"},
 		})
 
+	case "opencode":
+		configPath := filepath.Join(projectRoot, "opencode.json")
+		return writeMCPEntry(configPath, "mcp", map[string]interface{}{
+			"type":    "local",
+			"command": []string{"memtrace", "serve"},
+		})
+
+	case "windsurf":
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return false, fmt.Errorf("could not find home directory: %w", err)
+		}
+		configPath := filepath.Join(home, ".codeium", "windsurf", "mcp_config.json")
+		return writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
+			"command": "memtrace",
+			"args":    []string{"serve"},
+		})
+
+	case "gemini":
+		configPath := filepath.Join(projectRoot, ".gemini", "settings.json")
+		return writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
+			"command": "memtrace",
+			"args":    []string{"serve"},
+		})
+
 	default:
-		return false, fmt.Errorf("unknown agent %q — supported: claude-code, cursor, vscode", agent)
+		return false, fmt.Errorf("unknown agent %q — supported: claude-code, cursor, vscode, opencode, windsurf, gemini", agent)
 	}
 }
 
