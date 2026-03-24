@@ -131,6 +131,95 @@ func TestScoreBreakdown_HybridWeightsSumToOne(t *testing.T) {
 	}
 }
 
+// --- effectiveConfidence ---
+
+func TestEffectiveConfidence_Fresh(t *testing.T) {
+	now := time.Now()
+	m := &types.Memory{Confidence: 1.0, UpdatedAt: now}
+	got := effectiveConfidence(m, now)
+	if got < 0.99 {
+		t.Errorf("fresh memory should have near-full confidence, got %f", got)
+	}
+}
+
+func TestEffectiveConfidence_HalfLife(t *testing.T) {
+	now := time.Now()
+	// Memory last updated exactly one half-life ago.
+	halfLife := time.Duration(confDecayHalfLifeMs) * time.Millisecond
+	m := &types.Memory{Confidence: 1.0, UpdatedAt: now.Add(-halfLife)}
+	got := effectiveConfidence(m, now)
+	if got < 0.49 || got > 0.51 {
+		t.Errorf("at half-life, confidence should be ~0.5, got %f", got)
+	}
+}
+
+func TestEffectiveConfidence_Floor(t *testing.T) {
+	now := time.Now()
+	// Memory last updated 10 years ago — should hit the floor.
+	m := &types.Memory{Confidence: 1.0, UpdatedAt: now.Add(-10 * 365 * 24 * time.Hour)}
+	got := effectiveConfidence(m, now)
+	if got != confDecayFloor {
+		t.Errorf("very old memory should be at floor %f, got %f", confDecayFloor, got)
+	}
+}
+
+func TestEffectiveConfidence_AccessedRecentlyResetsDecay(t *testing.T) {
+	now := time.Now()
+	halfLife := time.Duration(confDecayHalfLifeMs) * time.Millisecond
+	accessedAt := now.Add(-time.Hour) // accessed 1 hour ago
+
+	// Memory was created/updated long ago but accessed recently.
+	m := &types.Memory{
+		Confidence: 1.0,
+		UpdatedAt:  now.Add(-halfLife * 3), // very old
+		AccessedAt: &accessedAt,
+	}
+	got := effectiveConfidence(m, now)
+	// Signal = accessed_at (1 hour ago) → virtually no decay
+	if got < 0.99 {
+		t.Errorf("recently accessed memory should have near-full confidence, got %f", got)
+	}
+}
+
+func TestEffectiveConfidence_LowBaseConfidence(t *testing.T) {
+	now := time.Now()
+	halfLife := time.Duration(confDecayHalfLifeMs) * time.Millisecond
+	m := &types.Memory{Confidence: 0.3, UpdatedAt: now.Add(-halfLife)}
+	got := effectiveConfidence(m, now)
+	// 0.3 * 0.5 = 0.15 — above floor
+	if got < 0.14 || got > 0.16 {
+		t.Errorf("want ~0.15 (0.3 * 0.5), got %f", got)
+	}
+}
+
+func TestEffectiveConfidence_FloorClamp(t *testing.T) {
+	now := time.Now()
+	halfLife := time.Duration(confDecayHalfLifeMs) * time.Millisecond
+	// 0.1 * 0.5 = 0.05 — below floor, should be clamped to 0.1
+	m := &types.Memory{Confidence: 0.1, UpdatedAt: now.Add(-halfLife)}
+	got := effectiveConfidence(m, now)
+	if got != confDecayFloor {
+		t.Errorf("want floor %f, got %f", confDecayFloor, got)
+	}
+}
+
+func TestScoreCandidates_OldMemoryScoresLower(t *testing.T) {
+	now := time.Now()
+	halfLife := time.Duration(confDecayHalfLifeMs) * time.Millisecond
+	candidates := []candidate{
+		{memory: types.Memory{ID: "fresh", Confidence: 1.0, CreatedAt: now, UpdatedAt: now}, bm25Rank: -5.0},
+		{memory: types.Memory{ID: "old", Confidence: 1.0, CreatedAt: now.Add(-halfLife * 4), UpdatedAt: now.Add(-halfLife * 4)}, bm25Rank: -5.0},
+	}
+	results := scoreCandidates(candidates, now, nil)
+	scores := map[string]float64{}
+	for _, r := range results {
+		scores[r.Memory.ID] = r.Score
+	}
+	if scores["fresh"] <= scores["old"] {
+		t.Errorf("fresh memory (%.3f) should outscore old memory (%.3f)", scores["fresh"], scores["old"])
+	}
+}
+
 func TestScoreBreakdown_SemanticOnlyWeightsSumToOne(t *testing.T) {
 	sum := weightSemanticOnly + weightRecency + weightConfidence + weightAccess
 	if sum < 0.999 || sum > 1.001 {
@@ -178,7 +267,7 @@ func TestScoreCandidates_MaxScoreWithSemanticOnly(t *testing.T) {
 	// A semantic-only candidate with perfect scores should approach 1.0.
 	now := time.Now()
 	candidates := []candidate{
-		{memory: types.Memory{ID: "perfect", Confidence: 1.0, AccessCount: 0, CreatedAt: now}, bm25Rank: 0},
+		{memory: types.Memory{ID: "perfect", Confidence: 1.0, AccessCount: 0, CreatedAt: now, UpdatedAt: now}, bm25Rank: 0},
 	}
 	semanticScores := map[string]float64{"perfect": 1.0}
 

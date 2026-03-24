@@ -28,6 +28,36 @@ const (
 // recencyHalfLifeMs is the half-life for recency decay: 30 days.
 const recencyHalfLifeMs = float64(30 * 24 * 60 * 60 * 1000)
 
+// confDecayHalfLifeMs is the half-life for confidence decay: 90 days.
+// A memory not accessed or updated for 90 days loses half its confidence weight.
+const confDecayHalfLifeMs = float64(90 * 24 * 60 * 60 * 1000)
+
+// confDecayFloor is the minimum effective confidence — memories never become
+// completely irrelevant just from age.
+const confDecayFloor = 0.1
+
+// effectiveConfidence returns the time-decayed confidence for scoring.
+// It does NOT modify the stored confidence value.
+//
+// The last-signal time is max(updated_at, accessed_at): either the user
+// confirmed/edited the memory, or an agent recently recalled it.
+// Confidence halves every 90 days without such a signal, down to confDecayFloor.
+func effectiveConfidence(m *types.Memory, now time.Time) float64 {
+	signal := m.UpdatedAt
+	if m.AccessedAt != nil && m.AccessedAt.After(signal) {
+		signal = *m.AccessedAt
+	}
+	ageMs := float64(now.Sub(signal).Milliseconds())
+	if ageMs < 0 {
+		ageMs = 0
+	}
+	decayed := m.Confidence * math.Pow(0.5, ageMs/confDecayHalfLifeMs)
+	if decayed < confDecayFloor {
+		decayed = confDecayFloor
+	}
+	return decayed
+}
+
 // candidate holds a memory and its raw BM25 rank for scoring.
 type candidate struct {
 	memory   types.Memory
@@ -65,8 +95,8 @@ func scoreCandidates(candidates []candidate, now time.Time, semanticScores map[s
 		ageMs := float64(now.Sub(c.memory.CreatedAt).Milliseconds())
 		recency := math.Pow(0.5, ageMs/recencyHalfLifeMs)
 
-		// Confidence: direct pass-through (already 0–1)
-		confidence := c.memory.Confidence
+		// Confidence: decayed by time since last access or update
+		confidence := effectiveConfidence(&c.memory, now)
 
 		// Access frequency: logarithmic scaling, capped at 1.0
 		accessFreq := math.Min(1.0, math.Log2(float64(c.memory.AccessCount)+1)/10.0)

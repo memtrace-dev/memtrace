@@ -219,15 +219,16 @@ func (p *Pipeline) semanticOnlySearch(input types.MemoryRecallInput) ([]types.Sc
 		recency := math.Pow(0.5, ageMs/recencyHalfLifeMs)
 		accessFreq := math.Min(1.0, math.Log2(float64(mem.AccessCount)+1)/10.0)
 		// Use weightSemanticOnly (0.50) so scores sum to 1.0, matching BM25-only mode.
+		conf := effectiveConfidence(mem, now)
 		score := weightSemanticOnly*r.sim + weightRecency*recency +
-			weightConfidence*mem.Confidence + weightAccess*accessFreq
+			weightConfidence*conf + weightAccess*accessFreq
 		results = append(results, types.ScoredMemory{
 			Memory: *mem,
 			Score:  score,
 			ScoreBreakdown: types.ScoreBreakdown{
 				TextRelevance:   r.sim,
 				Recency:         recency,
-				Confidence:      mem.Confidence,
+				Confidence:      conf,
 				AccessFrequency: accessFreq,
 			},
 		})
