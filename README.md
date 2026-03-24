@@ -174,6 +174,22 @@ Returns file-matched memories first (labeled `[file match]`), followed by semant
 
 ---
 
+## Private content
+
+Wrap any part of memory content in `<private>...</private>` tags to prevent it from being stored. The tags and their contents are stripped before the memory reaches the database — only the surrounding text is saved.
+
+```
+memory_save(
+  content: "Auth uses JWT RS256. <private>Signing key: sk-prod-abc123</private> Tokens expire after 1h.",
+  type: "convention"
+)
+// stored as: "Auth uses JWT RS256.  Tokens expire after 1h."
+```
+
+Tags are case-insensitive and support multiline blocks. This lets agents include full context in a save call without sensitive details ever being persisted.
+
+---
+
 ## Memory types
 
 | Type | Use for |
