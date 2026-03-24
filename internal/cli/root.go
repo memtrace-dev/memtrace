@@ -25,6 +25,7 @@ func NewRootCmd() *cobra.Command {
 		newReindexCmd(),
 		newScanCmd(),
 		newDoctorCmd(),
+		newLinkCmd(),
 		newConfigCmd(),
 	)
 

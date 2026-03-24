@@ -221,6 +221,7 @@ memtrace serve   [--dir <path>]
 memtrace status  [--json]
 memtrace reindex
 memtrace scan
+memtrace link    <file> [file...] [--dry-run] [--type fact]
 memtrace doctor
 memtrace config  get
 memtrace config  set <key> <value>
@@ -333,6 +334,30 @@ Environment variables override config file values.
 | `MEMTRACE_EMBED_URL` | `https://api.openai.com/v1` | Base URL of the embeddings API. |
 | `MEMTRACE_EMBED_MODEL` | `text-embedding-3-small` | Model name. |
 | `MEMTRACE_EMBED_PROVIDER` | `auto` | Set to `disabled` to turn off embeddings entirely. |
+
+---
+
+## Memory-to-code linking
+
+`memtrace link` parses source files and creates one memory per top-level symbol — functions, types, classes, interfaces, structs, enums, and traits. Supports Go (via `go/ast`), TypeScript, JavaScript, Python, and Rust.
+
+```bash
+memtrace link src/auth/middleware.go
+
+# Linking src/auth/middleware.go (3 symbols):
+#   saved  01KMFOO...  function `ValidateJWT`
+#   saved  01KMBAR...  struct `AuthConfig`
+#   saved  01KMBAZ...  interface `Validator`
+# 3 symbols linked.
+```
+
+Preview without saving:
+
+```bash
+memtrace link --dry-run src/auth/*.go
+```
+
+Linked memories are tagged with `symbol`, the kind (`function`, `struct`, ...), and the language (`go`, `typescript`, ...). They are also linked to the source file path, so `memory_context` and `memtrace scan` pick them up automatically.
 
 ---
 
