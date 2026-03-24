@@ -725,6 +725,7 @@ func TestReindexCmd_WithEmbedder(t *testing.T) {
 	)
 
 	// Enable the embedder for the reindex run.
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "")
 	t.Setenv("MEMTRACE_EMBED_KEY", "test-key")
 	t.Setenv("MEMTRACE_EMBED_URL", srv.URL)
 

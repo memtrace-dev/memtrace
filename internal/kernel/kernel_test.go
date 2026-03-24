@@ -241,6 +241,7 @@ func TestKernel_HasEmbedder_False(t *testing.T) {
 }
 
 func TestKernel_HasEmbedder_True(t *testing.T) {
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "")
 	t.Setenv("MEMTRACE_EMBED_KEY", "test-key")
 	k := setupTestKernel(t)
 	if !k.HasEmbedder() {
@@ -315,6 +316,7 @@ func fakeEmbedServer(t *testing.T) *httptest.Server {
 
 func TestKernel_Reindex_WithEmbedder(t *testing.T) {
 	srv := fakeEmbedServer(t)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "")
 	t.Setenv("MEMTRACE_EMBED_KEY", "test-key")
 	t.Setenv("MEMTRACE_EMBED_URL", srv.URL)
 
@@ -344,6 +346,7 @@ func TestKernel_Reindex_WithEmbedder(t *testing.T) {
 
 func TestKernel_Reindex_SkipsAlreadyEmbedded(t *testing.T) {
 	srv := fakeEmbedServer(t)
+	t.Setenv("MEMTRACE_EMBED_PROVIDER", "")
 	t.Setenv("MEMTRACE_EMBED_KEY", "test-key")
 	t.Setenv("MEMTRACE_EMBED_URL", srv.URL)
 
