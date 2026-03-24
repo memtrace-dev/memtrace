@@ -21,6 +21,7 @@ func NewRootCmd() *cobra.Command {
 		newExportCmd(),
 		newImportCmd(),
 		newServeCmd(),
+		newBrowseCmd(),
 		newStatusCmd(),
 		newReindexCmd(),
 		newScanCmd(),

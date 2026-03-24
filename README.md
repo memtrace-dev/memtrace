@@ -217,6 +217,7 @@ memtrace list    [--limit 20] [--type convention] [--status active] [--json]
 memtrace rm      <id|prefix>
 memtrace export  [--output memories.json] [--type decision] [--status active]
 memtrace import  <file|url> [--type decision] [--dry-run]
+memtrace browse
 memtrace serve   [--dir <path>]
 memtrace status  [--json]
 memtrace reindex
@@ -334,6 +335,25 @@ Environment variables override config file values.
 | `MEMTRACE_EMBED_URL` | `https://api.openai.com/v1` | Base URL of the embeddings API. |
 | `MEMTRACE_EMBED_MODEL` | `text-embedding-3-small` | Model name. |
 | `MEMTRACE_EMBED_PROVIDER` | `auto` | Set to `disabled` to turn off embeddings entirely. |
+
+---
+
+## Interactive browser
+
+`memtrace browse` opens a full-screen terminal UI for browsing and managing memories:
+
+```
+  [decision  ] We use JWT with RS256 — stateless API, no session storage
+               3d ago  ·  tags: auth, security
+
+  [convention] Error handling: always wrap with fmt.Errorf("...: %w", err)
+               1h ago  ·  tags: go, errors
+
+  [fact      ] Database schema is on v3 — see db/migrations/003.sql
+               5d ago  ·  files: db/migrations/003.sql
+```
+
+Key bindings: `/` filter · `enter` view full memory · `e` edit in `$EDITOR` · `d` delete (with confirmation) · `esc` back · `q` quit.
 
 ---
 
