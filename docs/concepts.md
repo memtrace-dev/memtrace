@@ -1,0 +1,149 @@
+# Concepts
+
+---
+
+## Memory types
+
+| Type | Use for |
+|------|---------|
+| `decision` | Architecture choices, tooling selections, approach rationale |
+| `convention` | Naming rules, code style, structural standards |
+| `fact` | Durable truths about the codebase |
+| `event` | Migrations, incidents, refactors, session summaries, prompts |
+
+If you don't specify a type, memtrace defaults to `fact`.
+
+---
+
+## Confidence
+
+Every memory has a confidence score between 0.0 and 1.0. New memories start at 1.0.
+
+**Decay** — confidence decays exponentially with a 90-day half-life using the most recent signal (last updated or last accessed). The floor is 0.1 — memories never reach zero. Accessing a memory via recall resets the clock.
+
+This means stale, never-accessed memories naturally sink in search results over time while frequently recalled ones stay prominent.
+
+**Manual override** — you can set confidence explicitly:
+
+```bash
+memtrace update 01KMDX71NT --confidence 0.5
+```
+
+```
+memory_update(id: "01KMDX71NT...", confidence: 0.5)
+```
+
+---
+
+## Staleness detection
+
+Memories that reference source files can go stale when those files change. Run `memtrace scan` to check:
+
+```bash
+memtrace scan
+```
+
+```
+  stale  01ABCDEF1234  "Auth uses RS256 JWT..." — file modified: src/auth/middleware.go
+  stale  01EFGH567890  "Schema migration v3..." — file deleted: db/migrations/003.sql
+
+2 memories marked stale (11 unchanged).
+```
+
+A memory is marked stale when any of its `file_paths` has been deleted or modified more recently than the memory was last updated.
+
+Review with:
+
+```bash
+memtrace list --status stale
+```
+
+Then edit, update, or delete them.
+
+---
+
+## Private content
+
+Wrap any part of memory content in `<private>...</private>` to prevent it from being stored. The tags and their contents are stripped before the memory reaches the database.
+
+```
+memory_save(
+  content: "Auth uses JWT RS256. <private>Signing key: sk-prod-abc123</private> Tokens expire after 1h.",
+  type: "convention"
+)
+// stored as: "Auth uses JWT RS256.  Tokens expire after 1h."
+```
+
+Tags are case-insensitive (`<PRIVATE>`, `<Private>`) and support multiline blocks. This lets agents include full context in a save call without sensitive details ever being persisted.
+
+---
+
+## Topic keys
+
+`topic_key` is a stable identifier that prevents duplicate memories from accumulating as a project evolves.
+
+```
+memory_save(
+  content:   "We use Postgres 16 with pgvector",
+  type:      "decision",
+  topic_key: "decision/database"
+)
+
+// Later, when you upgrade:
+memory_save(
+  content:   "We use Postgres 17 with pgvector — upgraded March 2026",
+  type:      "decision",
+  topic_key: "decision/database"   // updates the existing memory instead of creating a new one
+)
+```
+
+Good topic keys are hierarchical and stable: `decision/auth`, `convention/error-handling`, `fact/db-schema-version`.
+
+---
+
+## Session auto-summarization
+
+When an MCP session ends, memtrace automatically saves a compact `event` memory recording what happened — but only if at least one memory was written. Read-only sessions produce no noise.
+
+```
+Session 2026-03-23T14:32Z (45m): saved 3 memories — "We use JWT with RS256" [decision],
+"Error handling convention" [convention], "DB schema on v2" [fact]. Recalled 5 times.
+```
+
+Review session history:
+
+```bash
+memtrace list --type event
+```
+
+---
+
+## Memory-to-code linking
+
+`memtrace link` parses source files and creates one memory per top-level symbol — functions, types, classes, interfaces, structs, enums, and traits. Supports Go (via `go/ast`), TypeScript, JavaScript, Python, and Rust.
+
+```bash
+memtrace link src/auth/middleware.go
+
+# Linking src/auth/middleware.go (3 symbols):
+#   saved  01KMFOO...  function `ValidateJWT`
+#   saved  01KMBAR...  struct `AuthConfig`
+#   saved  01KMBAZ...  interface `Validator`
+# 3 symbols linked.
+```
+
+Preview without saving:
+
+```bash
+memtrace link --dry-run src/auth/*.go
+```
+
+Linked memories are tagged `symbol`, the kind (`function`, `struct`, etc.), and the language. They are linked to the source file path, so `memory_context` and `memtrace scan` pick them up automatically.
+
+---
+
+## Storage
+
+All data lives in `.memtrace/memtrace.db` — SQLite with WAL mode, local-only, no account required. The `.memtrace/` directory is added to `.gitignore` automatically on init.
+
+Memory IDs are [ULIDs](https://github.com/ulid/spec) — lexicographically sortable, collision-resistant, and time-ordered.
