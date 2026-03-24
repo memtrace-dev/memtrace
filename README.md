@@ -42,11 +42,21 @@ On `memtrace init`, it auto-imports your existing Claude Code memories, Cursor r
 
 ## Install
 
+**Homebrew (macOS / Linux):**
+
+```bash
+brew install memtrace-dev/tap/memtrace
+```
+
+**Go install:**
+
 ```bash
 go install github.com/memtrace-dev/memtrace/cmd/memtrace@latest
 ```
 
-Or build from source:
+**Prebuilt binaries** — download from the [latest release](https://github.com/memtrace-dev/memtrace/releases/latest) for macOS, Linux, or Windows.
+
+**Build from source:**
 
 ```bash
 git clone https://github.com/memtrace-dev/memtrace
@@ -446,11 +456,12 @@ All data lives in `.memtrace/memtrace.db` inside your project — SQLite, local-
 ## Development
 
 ```bash
-# Build
-make install
-
-# Test
-go test ./...
+make build      # build binary to bin/memtrace
+make install    # build and copy to $GOPATH/bin
+make test       # run all tests
+make lint       # go vet
+make snapshot   # cross-platform build via goreleaser (no publish)
+make release VERSION=1.2.3  # tag + push → triggers GitHub release workflow
 ```
 
 ---

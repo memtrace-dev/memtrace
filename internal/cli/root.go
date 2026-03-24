@@ -3,11 +3,16 @@ package cli
 import "github.com/spf13/cobra"
 
 // NewRootCmd builds and returns the root cobra command.
-func NewRootCmd() *cobra.Command {
+func NewRootCmd(version ...string) *cobra.Command {
+	v := "dev"
+	if len(version) > 0 && version[0] != "" {
+		v = version[0]
+	}
 	root := &cobra.Command{
-		Use:   "memtrace",
-		Short: "Local-first memory engine for AI coding agents",
-		Long:  "Memtrace gives AI coding tools persistent, structured memory across sessions.\nWebsite: https://memtrace.sh",
+		Use:     "memtrace",
+		Short:   "Local-first memory engine for AI coding agents",
+		Long:    "Memtrace gives AI coding tools persistent, structured memory across sessions.\nWebsite: https://memtrace.sh",
+		Version: v,
 	}
 
 	root.AddCommand(

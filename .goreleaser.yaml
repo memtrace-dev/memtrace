@@ -1,0 +1,87 @@
+version: 2
+
+project_name: memtrace
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: memtrace
+    main: ./cmd/memtrace
+    binary: memtrace
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: memtrace
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: "New features"
+      regexp: "^feat"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "^fix"
+      order: 1
+    - title: "Documentation"
+      regexp: "^docs"
+      order: 2
+    - title: "Other"
+      order: 999
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+      - "merge conflict"
+      - "Merge pull request"
+
+release:
+  github:
+    owner: memtrace-dev
+    name: memtrace
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+brews:
+  - name: memtrace
+    repository:
+      owner: memtrace-dev
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://memtrace.sh
+    description: "Local-first memory engine for AI coding agents"
+    license: MIT
+    test: |
+      system "#{bin}/memtrace", "--version"
+    install: |
+      bin.install "memtrace"
