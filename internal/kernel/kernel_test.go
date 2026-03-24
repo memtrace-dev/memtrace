@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -480,5 +481,99 @@ func TestScanStaleness_FileUnchanged(t *testing.T) {
 	}
 	if res.Marked != 0 {
 		t.Errorf("want Marked=0 (file unchanged), got %d", res.Marked)
+	}
+}
+
+// --- filePathsToQuery ---
+
+func TestFilePathsToQuery(t *testing.T) {
+	cases := []struct {
+		paths []string
+		want  []string // terms that must appear
+	}{
+		{[]string{"src/auth/middleware.go"}, []string{"auth", "middleware"}},
+		{[]string{"internal/db/store.go"}, []string{"internal", "db", "store"}},
+		{[]string{"README.md"}, []string{"README"}},
+		{[]string{"pkg/my_service/handler.go"}, []string{"my", "service", "handler"}},
+	}
+	for _, tc := range cases {
+		got := filePathsToQuery(tc.paths)
+		for _, term := range tc.want {
+			found := false
+			for _, word := range strings.Fields(got) {
+				if word == term {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("filePathsToQuery(%v) = %q, missing term %q", tc.paths, got, term)
+			}
+		}
+	}
+}
+
+// --- ContextForFiles ---
+
+func TestContextForFiles_Empty(t *testing.T) {
+	k := setupTestKernel(t)
+	results, err := k.ContextForFiles(nil, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected empty results for nil paths, got %d", len(results))
+	}
+}
+
+func TestContextForFiles_DirectMatch(t *testing.T) {
+	k := setupTestKernel(t)
+	k.Save(types.MemorySaveInput{
+		Content:   "Auth uses RS256 JWT",
+		FilePaths: []string{"src/auth/middleware.go"},
+	})
+	k.Save(types.MemorySaveInput{
+		Content:   "DB uses Postgres",
+		FilePaths: []string{"internal/db/store.go"},
+	})
+
+	results, err := k.ContextForFiles([]string{"src/auth/middleware.go"}, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	// First result should be the direct file match with score=1.0
+	if results[0].Score != 1.0 {
+		t.Errorf("expected file-match score 1.0, got %f", results[0].Score)
+	}
+	if results[0].Memory.Content != "Auth uses RS256 JWT" {
+		t.Errorf("expected matched memory, got: %s", results[0].Memory.Content)
+	}
+}
+
+func TestContextForFiles_DeduplicatesAcrossSources(t *testing.T) {
+	k := setupTestKernel(t)
+	// This memory matches both file path AND keyword "auth"
+	k.Save(types.MemorySaveInput{
+		Content:   "Auth validates JWT on every request",
+		FilePaths: []string{"src/auth/middleware.go"},
+		Tags:      []string{"auth"},
+	})
+
+	results, err := k.ContextForFiles([]string{"src/auth/middleware.go"}, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should appear exactly once despite matching both signals
+	count := 0
+	for _, r := range results {
+		if r.Memory.Content == "Auth validates JWT on every request" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected memory to appear exactly once, appeared %d times", count)
 	}
 }

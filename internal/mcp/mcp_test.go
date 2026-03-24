@@ -404,3 +404,84 @@ func TestMemoryForgetTool_NoArgs(t *testing.T) {
 		t.Errorf("expected usage hint, got: %s", text)
 	}
 }
+
+// --- memory_context ---
+
+func TestMemoryContextTool_NoFilePaths(t *testing.T) {
+	s, _ := setupServer(t)
+	result := callTool(t, s, "memory_context", map[string]interface{}{
+		"file_paths": []interface{}{},
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "No file paths") {
+		t.Errorf("expected no-file-paths message, got: %s", text)
+	}
+}
+
+func TestMemoryContextTool_DirectFileMatch(t *testing.T) {
+	s, k := setupServer(t)
+
+	// Save a memory linked to a specific file.
+	k.Save(types.MemorySaveInput{
+		Content:   "Auth middleware validates JWT tokens",
+		FilePaths: []string{"src/auth/middleware.go"},
+		Tags:      []string{"auth"},
+	})
+	// Save an unrelated memory.
+	k.Save(types.MemorySaveInput{
+		Content:   "Database uses PostgreSQL",
+		FilePaths: []string{"internal/db/store.go"},
+	})
+
+	result := callTool(t, s, "memory_context", map[string]interface{}{
+		"file_paths": []interface{}{"src/auth/middleware.go"},
+	})
+	text := resultText(t, result)
+
+	if !strings.Contains(text, "file match") {
+		t.Errorf("expected [file match] label, got: %s", text)
+	}
+	if !strings.Contains(text, "Auth middleware") {
+		t.Errorf("expected matched memory content, got: %s", text)
+	}
+	if strings.Contains(text, "PostgreSQL") {
+		t.Errorf("unrelated memory should not appear, got: %s", text)
+	}
+}
+
+func TestMemoryContextTool_NoMatchReturnsNoMemories(t *testing.T) {
+	s, _ := setupServer(t)
+	result := callTool(t, s, "memory_context", map[string]interface{}{
+		"file_paths": []interface{}{"src/nonexistent/file.go"},
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "No relevant") {
+		t.Errorf("expected no-memories message, got: %s", text)
+	}
+}
+
+func TestMemoryContextTool_MultipleFiles(t *testing.T) {
+	s, k := setupServer(t)
+
+	k.Save(types.MemorySaveInput{
+		Content:   "Handler returns 401 for unauthenticated requests",
+		FilePaths: []string{"src/auth/handler.go"},
+	})
+	k.Save(types.MemorySaveInput{
+		Content:   "Middleware chains must call next()",
+		FilePaths: []string{"src/auth/middleware.go"},
+	})
+
+	result := callTool(t, s, "memory_context", map[string]interface{}{
+		"file_paths": []interface{}{"src/auth/handler.go", "src/auth/middleware.go"},
+	})
+	text := resultText(t, result)
+
+	if !strings.Contains(text, "401") {
+		t.Errorf("expected first memory, got: %s", text)
+	}
+	if !strings.Contains(text, "Middleware chains") {
+		t.Errorf("expected second memory, got: %s", text)
+	}
+}
+

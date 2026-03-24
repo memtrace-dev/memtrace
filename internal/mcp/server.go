@@ -234,6 +234,66 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel) {
 			), nil
 		},
 	)
+
+	// Tool 5: memory_context
+	s.AddTool(
+		mcp.NewTool("memory_context",
+			mcp.WithDescription("Get all memories relevant to a set of files you are about to read or edit. Call this at the start of any task that touches specific files to surface conventions, decisions, and facts linked to those files."),
+			mcp.WithArray("file_paths",
+				mcp.Required(),
+				mcp.Description(`Files you are about to work with, relative to project root, e.g. ["src/auth/middleware.go", "src/auth/handler.go"]`),
+			),
+			mcp.WithNumber("limit",
+				mcp.Description("Max results to return. Default: 10, max: 50"),
+			),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			filePaths := extractStringSlice(args, "file_paths")
+			if len(filePaths) == 0 {
+				return mcp.NewToolResultText("No file paths provided."), nil
+			}
+			limit := 10
+			if l, ok := args["limit"].(float64); ok {
+				limit = int(l)
+			}
+
+			results, err := k.ContextForFiles(filePaths, limit)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if len(results) == 0 {
+				return mcp.NewToolResultText("No relevant memories found for these files."), nil
+			}
+
+			var buf strings.Builder
+			fmt.Fprintf(&buf, "Context for %d file(s):\n", len(filePaths))
+			for _, p := range filePaths {
+				fmt.Fprintf(&buf, "  %s\n", p)
+			}
+			buf.WriteString("\n")
+
+			for i, r := range results {
+				m := r.Memory
+				label := "related"
+				if r.Score >= 1.0 {
+					label = "file match"
+				}
+				fmt.Fprintf(&buf, "[%s] (%s, %s, confidence: %.1f) %s",
+					label, m.Type, formatAge(m.CreatedAt), m.Confidence, m.Content)
+				if len(m.Tags) > 0 {
+					fmt.Fprintf(&buf, "\n   tags: %s", strings.Join(m.Tags, ", "))
+				}
+				if len(m.FilePaths) > 0 {
+					fmt.Fprintf(&buf, "\n   files: %s", strings.Join(m.FilePaths, ", "))
+				}
+				if i < len(results)-1 {
+					buf.WriteString("\n\n")
+				}
+			}
+			return mcp.NewToolResultText(buf.String()), nil
+		},
+	)
 }
 
 func extractStringSlice(args map[string]interface{}, key string) []string {

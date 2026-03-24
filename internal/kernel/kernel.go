@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/memtrace-dev/memtrace/internal/embedding"
@@ -316,6 +317,104 @@ func (k *MemoryKernel) ScanStaleness(projectRoot string) (ScanResult, error) {
 		})
 	}
 	return res, nil
+}
+
+// ContextForFiles returns memories relevant to the given file paths.
+// It combines two signals:
+//  1. Direct file match — memories whose file_paths overlap the input
+//  2. Inferred keyword recall — file/dir names used as a search query
+//
+// File-matched memories are returned first (score=1.0), followed by
+// keyword-matched memories not already in the file set.
+func (k *MemoryKernel) ContextForFiles(filePaths []string, limit int) ([]types.ScoredMemory, error) {
+	if len(filePaths) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	// 1. Direct file match
+	byFile, err := k.store.FindByFilePaths(k.projectID, filePaths)
+	if err != nil {
+		return nil, fmt.Errorf("file match: %w", err)
+	}
+
+	// 2. Keyword search inferred from file paths
+	query := filePathsToQuery(filePaths)
+	byQuery, err := k.Recall(types.MemoryRecallInput{
+		Query: query,
+		Limit: limit * 2,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("keyword recall: %w", err)
+	}
+
+	// 3. Merge, deduplicating by ID. File-matched memories get score=1.0.
+	seen := make(map[string]bool, len(byFile)+len(byQuery))
+	results := make([]types.ScoredMemory, 0, limit)
+
+	for i := range byFile {
+		m := &byFile[i]
+		if seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		results = append(results, types.ScoredMemory{Memory: *m, Score: 1.0})
+	}
+	for _, r := range byQuery {
+		if seen[r.Memory.ID] {
+			continue
+		}
+		seen[r.Memory.ID] = true
+		results = append(results, r)
+	}
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
+// filePathsToQuery extracts meaningful search terms from a list of file paths.
+// "src/auth/middleware.go" → "auth middleware"
+func filePathsToQuery(paths []string) string {
+	seen := make(map[string]bool)
+	var terms []string
+	for _, p := range paths {
+		// Collect dir components (skip "." and common noise)
+		dir := filepath.Dir(p)
+		if dir != "." {
+			for _, seg := range strings.Split(dir, string(filepath.Separator)) {
+				if seg == "." || seg == "" {
+					continue
+				}
+				for _, part := range strings.FieldsFunc(seg, func(r rune) bool {
+					return r == '_' || r == '-'
+				}) {
+					if !seen[part] {
+						seen[part] = true
+						terms = append(terms, part)
+					}
+				}
+			}
+		}
+		// Collect filename without extension, split on _ - .
+		base := filepath.Base(p)
+		name := strings.TrimSuffix(base, filepath.Ext(base))
+		for _, part := range strings.FieldsFunc(name, func(r rune) bool {
+			return r == '_' || r == '-' || r == '.'
+		}) {
+			if !seen[part] {
+				seen[part] = true
+				terms = append(terms, part)
+			}
+		}
+	}
+	return strings.Join(terms, " ")
 }
 
 // stalenessReason returns a non-empty string describing why m is stale, or ""

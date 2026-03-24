@@ -241,6 +241,47 @@ func (s *MemoryStore) TouchAccess(id string, now time.Time) error {
 	return err
 }
 
+// FindByFilePaths returns active memories whose file_paths array contains any
+// of the given paths. Uses SQLite json_each to expand the stored JSON arrays.
+func (s *MemoryStore) FindByFilePaths(projectID string, paths []string) ([]types.Memory, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	// Build IN clause placeholders
+	ph := make([]string, len(paths))
+	args := make([]interface{}, 0, 1+len(paths))
+	args = append(args, projectID)
+	for i, p := range paths {
+		ph[i] = "?"
+		args = append(args, p)
+	}
+
+	rows, err := s.db.Query(fmt.Sprintf(`
+		SELECT DISTINCT m.*
+		FROM memories m, json_each(m.file_paths) je
+		WHERE m.project_id = ?
+		  AND m.status = 'active'
+		  AND je.value IN (%s)
+		ORDER BY m.updated_at DESC
+		LIMIT 50
+	`, strings.Join(ph, ",")), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []types.Memory
+	for rows.Next() {
+		m, err := scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *m)
+	}
+	return result, rows.Err()
+}
+
 // FindUnembedded returns IDs and content for all active memories in the project
 // that have no stored embedding (embedding IS NULL).
 func (s *MemoryStore) FindUnembedded(projectID string) ([]struct{ ID, Content string }, error) {
