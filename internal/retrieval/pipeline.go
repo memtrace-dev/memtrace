@@ -65,28 +65,26 @@ func (p *Pipeline) Recall(input types.MemoryRecallInput) ([]types.ScoredMemory, 
 
 	// Resolve each FTS row to a full memory and apply hard filters.
 	candidates := make([]candidate, 0, len(ftsResults))
+	ftsIDs := make(map[string]bool, len(ftsResults))
 	for _, r := range ftsResults {
-		r := r // capture loop variable
 		mem, err := p.store.FindByRowID(r.RowID)
 		if err != nil || mem == nil {
 			continue
 		}
-		if input.Type != "" && mem.Type != input.Type {
+		if !passesFilters(mem, input) {
 			continue
 		}
-		if input.MinConfidence > 0 && mem.Confidence < input.MinConfidence {
-			continue
-		}
-		if len(input.Tags) > 0 && !hasAllTags(mem.Tags, input.Tags) {
-			continue
-		}
+		ftsIDs[mem.ID] = true
 		candidates = append(candidates, candidate{memory: *mem, bm25Rank: r.Rank})
 	}
 
-	// Optionally rerank using embedding similarity.
+	// In hybrid mode, score all stored embeddings against the query and expand
+	// the candidate pool with top-K semantic results not already found by FTS.
+	// This ensures semantically relevant memories are found even when they lack
+	// the exact keywords the user typed.
 	var semanticScores map[string]float64
-	if p.embedder != nil && len(candidates) > 0 {
-		semanticScores = p.computeSemanticScores(input.Query, candidates)
+	if p.embedder != nil {
+		semanticScores, candidates = p.hybridExpand(input, candidates, ftsIDs, candidateLimit)
 	}
 
 	// Score, sort, and limit.
@@ -101,34 +99,80 @@ func (p *Pipeline) Recall(input types.MemoryRecallInput) ([]types.ScoredMemory, 
 	return scored, nil
 }
 
-// computeSemanticScores embeds the query and computes cosine similarity against
-// stored embeddings for the given candidates. Returns a map of memory ID → similarity.
-// If the query embedding fails or no stored embeddings exist, returns nil.
-func (p *Pipeline) computeSemanticScores(query string, candidates []candidate) map[string]float64 {
-	queryVec, err := p.embedder.Embed(query)
+// hybridExpand embeds the query, scores all stored embeddings, and adds any
+// top-K semantic results that were not already found by FTS. Returns the
+// updated candidate slice and the full semantic score map.
+func (p *Pipeline) hybridExpand(
+	input types.MemoryRecallInput,
+	candidates []candidate,
+	ftsIDs map[string]bool,
+	limit int,
+) (map[string]float64, []candidate) {
+	queryVec, err := p.embedder.Embed(input.Query)
 	if err != nil || len(queryVec) == 0 {
-		return nil
+		return nil, candidates
 	}
 
 	storedEmbeddings, err := p.store.FindEmbeddings(p.projectID)
 	if err != nil || len(storedEmbeddings) == 0 {
-		return nil
+		return nil, candidates
 	}
 
-	// Build a set of candidate IDs for fast lookup
-	candidateIDs := make(map[string]bool, len(candidates))
-	for _, c := range candidates {
-		candidateIDs[c.memory.ID] = true
+	// Score every stored embedding against the query.
+	type semRow struct {
+		id  string
+		sim float64
 	}
-
-	scores := make(map[string]float64, len(candidates))
+	semRows := make([]semRow, 0, len(storedEmbeddings))
+	semScores := make(map[string]float64, len(storedEmbeddings))
 	for _, row := range storedEmbeddings {
-		if !candidateIDs[row.ID] {
+		sim := embedding.CosineSimilarity(queryVec, row.Embedding)
+		if sim > 0 {
+			semScores[row.ID] = sim
+			semRows = append(semRows, semRow{row.ID, sim})
+		}
+	}
+
+	// Sort by similarity descending and add top candidates not already in FTS set.
+	sort.Slice(semRows, func(i, j int) bool { return semRows[i].sim > semRows[j].sim })
+	added := 0
+	for _, r := range semRows {
+		if added >= limit {
+			break
+		}
+		if ftsIDs[r.id] {
+			continue // already in candidate pool
+		}
+		mem, err := p.store.FindByID(r.id)
+		if err != nil || mem == nil {
 			continue
 		}
-		scores[row.ID] = embedding.CosineSimilarity(queryVec, row.Embedding)
+		if !passesFilters(mem, input) {
+			continue
+		}
+		// bm25Rank = 0 → normalises to 0 in the scorer, so this doc wins only via semantic signal.
+		candidates = append(candidates, candidate{memory: *mem, bm25Rank: 0})
+		added++
 	}
-	return scores
+
+	return semScores, candidates
+}
+
+// passesFilters returns true if m satisfies all hard filters in input.
+func passesFilters(m *types.Memory, input types.MemoryRecallInput) bool {
+	if input.Status != "" && m.Status != input.Status {
+		return false
+	}
+	if input.Type != "" && m.Type != input.Type {
+		return false
+	}
+	if input.MinConfidence > 0 && m.Confidence < input.MinConfidence {
+		return false
+	}
+	if len(input.Tags) > 0 && !hasAllTags(m.Tags, input.Tags) {
+		return false
+	}
+	return true
 }
 
 // semanticOnlySearch is used when FTS returns no candidates. It embeds the query,
@@ -158,6 +202,7 @@ func (p *Pipeline) semanticOnlySearch(input types.MemoryRecallInput) ([]types.Sc
 	}
 	sort.Slice(ranked, func(i, j int) bool { return ranked[i].sim > ranked[j].sim })
 
+	now := time.Now()
 	results := make([]types.ScoredMemory, 0, input.Limit)
 	for _, r := range ranked {
 		if len(results) >= input.Limit {
@@ -167,22 +212,14 @@ func (p *Pipeline) semanticOnlySearch(input types.MemoryRecallInput) ([]types.Sc
 		if err != nil || mem == nil {
 			continue
 		}
-		if mem.Status != input.Status {
+		if !passesFilters(mem, input) {
 			continue
 		}
-		if input.Type != "" && mem.Type != input.Type {
-			continue
-		}
-		if input.MinConfidence > 0 && mem.Confidence < input.MinConfidence {
-			continue
-		}
-		if len(input.Tags) > 0 && !hasAllTags(mem.Tags, input.Tags) {
-			continue
-		}
-		ageMs := float64(time.Now().Sub(mem.CreatedAt).Milliseconds())
+		ageMs := float64(now.Sub(mem.CreatedAt).Milliseconds())
 		recency := math.Pow(0.5, ageMs/recencyHalfLifeMs)
 		accessFreq := math.Min(1.0, math.Log2(float64(mem.AccessCount)+1)/10.0)
-		score := weightSemantic*r.sim + weightRecency*recency +
+		// Use weightSemanticOnly (0.50) so scores sum to 1.0, matching BM25-only mode.
+		score := weightSemanticOnly*r.sim + weightRecency*recency +
 			weightConfidence*mem.Confidence + weightAccess*accessFreq
 		results = append(results, types.ScoredMemory{
 			Memory: *mem,

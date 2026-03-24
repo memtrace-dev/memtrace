@@ -7,19 +7,22 @@ import (
 	"github.com/memtrace-dev/memtrace/internal/types"
 )
 
-// Scoring weights (BM25-only mode) — must sum to 1.0.
+// Scoring weights — each set must sum to 1.0.
 const (
+	// BM25-only mode
 	weightText       = 0.50
 	weightRecency    = 0.25
 	weightConfidence = 0.15
 	weightAccess     = 0.10
-)
 
-// Scoring weights (hybrid mode: BM25 + semantic) — must sum to 1.0.
-// Text weight is split equally between BM25 and semantic similarity.
-const (
+	// Hybrid mode: BM25 + semantic (text weight split equally between the two)
 	weightBM25     = 0.25
 	weightSemantic = 0.25
+	// weightRecency, weightConfidence, weightAccess reused — total = 0.25+0.25+0.25+0.15+0.10 = 1.0
+
+	// Semantic-only mode (mirrors weightText)
+	weightSemanticOnly = 0.50
+	// weightRecency, weightConfidence, weightAccess reused — total = 0.50+0.25+0.15+0.10 = 1.0
 )
 
 // recencyHalfLifeMs is the half-life for recency decay: 30 days.

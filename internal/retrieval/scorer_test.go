@@ -130,3 +130,65 @@ func TestScoreBreakdown_HybridWeightsSumToOne(t *testing.T) {
 		t.Errorf("hybrid weights must sum to 1.0, got %f", sum)
 	}
 }
+
+func TestScoreBreakdown_SemanticOnlyWeightsSumToOne(t *testing.T) {
+	sum := weightSemanticOnly + weightRecency + weightConfidence + weightAccess
+	if sum < 0.999 || sum > 1.001 {
+		t.Errorf("semantic-only weights must sum to 1.0, got %f", sum)
+	}
+}
+
+func TestScoreCandidates_SemanticOnlyBeatsWeakFTS(t *testing.T) {
+	// A semantic-only doc (bm25Rank=0) with high similarity should score higher
+	// than a weakly-matched FTS doc once BM25 normalization makes the weak
+	// match small.
+	// With fts-strong at -10.0 and fts-weak at -0.5, maxRankMag=10.0.
+	// fts-weak text component: 0.25*0.05 + 0.25*0.10 ≈ 0.038.
+	// sem-only text component: 0.25*0   + 0.25*0.95 ≈ 0.238. sem-only wins.
+	now := time.Now()
+	candidates := []candidate{
+		{memory: types.Memory{ID: "fts-strong", Confidence: 1.0, CreatedAt: now}, bm25Rank: -10.0},
+		{memory: types.Memory{ID: "fts-weak", Confidence: 1.0, CreatedAt: now}, bm25Rank: -0.5},
+		{memory: types.Memory{ID: "sem-only", Confidence: 1.0, CreatedAt: now}, bm25Rank: 0},
+	}
+	semanticScores := map[string]float64{
+		"fts-strong": 0.10,
+		"fts-weak":   0.10,
+		"sem-only":   0.95,
+	}
+
+	results := scoreCandidates(candidates, now, semanticScores)
+	if len(results) != 3 {
+		t.Fatalf("want 3 results, got %d", len(results))
+	}
+
+	scores := make(map[string]float64, 3)
+	for _, r := range results {
+		scores[r.Memory.ID] = r.Score
+	}
+	if scores["sem-only"] <= scores["fts-weak"] {
+		t.Errorf("sem-only score (%f) should exceed fts-weak score (%f)", scores["sem-only"], scores["fts-weak"])
+	}
+	if scores["fts-strong"] <= scores["sem-only"] {
+		t.Errorf("fts-strong score (%f) should exceed sem-only score (%f)", scores["fts-strong"], scores["sem-only"])
+	}
+}
+
+func TestScoreCandidates_MaxScoreWithSemanticOnly(t *testing.T) {
+	// A semantic-only candidate with perfect scores should approach 1.0.
+	now := time.Now()
+	candidates := []candidate{
+		{memory: types.Memory{ID: "perfect", Confidence: 1.0, AccessCount: 0, CreatedAt: now}, bm25Rank: 0},
+	}
+	semanticScores := map[string]float64{"perfect": 1.0}
+
+	results := scoreCandidates(candidates, now, semanticScores)
+	if results[0].Score > 1.0 {
+		t.Errorf("score must not exceed 1.0, got %f", results[0].Score)
+	}
+	// weightBM25*0 + weightSemantic*1 + weightRecency*~1 + weightConfidence*1 + weightAccess*0
+	// = 0 + 0.25 + ~0.25 + 0.15 + 0 ≈ 0.65+
+	if results[0].Score < 0.60 {
+		t.Errorf("perfect semantic doc should score above 0.60, got %f", results[0].Score)
+	}
+}
