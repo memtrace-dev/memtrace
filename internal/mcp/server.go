@@ -28,7 +28,7 @@ func Serve(k *kernel.MemoryKernel) error {
 
 	// Auto-save session summary (best-effort, never blocks the shutdown).
 	if text := tracker.summary(); text != "" {
-		_, _ = k.Save(types.MemorySaveInput{
+		_, _, _ = k.Save(types.MemorySaveInput{
 			Content: text,
 			Type:    types.MemoryTypeEvent,
 			Source:  types.MemorySourceAgent,
@@ -43,10 +43,10 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel, tracker *session
 	// Tool 1: memory_save
 	s.AddTool(
 		mcp.NewTool("memory_save",
-			mcp.WithDescription("Save a memory (decision, convention, fact, or event) to the local memory store. Use this when you learn something important about the project that should persist across sessions."),
+			mcp.WithDescription("Save a memory (decision, convention, fact, or event) to the local memory store. Use this when you learn something important about the project that should persist across sessions. If topic_key is provided and a memory with that key already exists, it is updated instead of creating a duplicate."),
 			mcp.WithString("content",
 				mcp.Required(),
-				mcp.Description("The memory content to save. Be specific and self-contained."),
+				mcp.Description("The memory content to save. Be specific and self-contained. Wrap sensitive details in <private>...</private> to prevent them from being stored."),
 			),
 			mcp.WithString("type",
 				mcp.Description("Memory type: decision, convention, fact, event. Default: fact"),
@@ -57,6 +57,9 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel, tracker *session
 			mcp.WithArray("file_paths",
 				mcp.Description(`Related file paths relative to project root, e.g. ["src/auth/middleware.go"]`),
 			),
+			mcp.WithString("topic_key",
+				mcp.Description(`Stable identifier for this memory, e.g. "convention/error-handling" or "decision/database". Re-saving with the same key updates the existing memory instead of creating a duplicate.`),
+			),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			args := req.GetArguments()
@@ -64,20 +67,58 @@ func registerTools(s *server.MCPServer, k *kernel.MemoryKernel, tracker *session
 			memType, _ := args["type"].(string)
 			tags := extractStringSlice(args, "tags")
 			filePaths := extractStringSlice(args, "file_paths")
+			topicKey, _ := args["topic_key"].(string)
 
-			mem, err := k.Save(types.MemorySaveInput{
+			mem, upserted, err := k.Save(types.MemorySaveInput{
 				Content:   content,
 				Type:      types.MemoryType(memType),
 				Source:    types.MemorySourceAgent,
 				Tags:      tags,
+				FilePaths: filePaths,
+				TopicKey:  topicKey,
+			})
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			tracker.recordSave(mem.ID, mem.Summary, mem.Type)
+			verb := "Saved"
+			if upserted {
+				verb = "Updated"
+			}
+			text := fmt.Sprintf("%s memory %s (%s): %s", verb, mem.ID, mem.Type, mem.Summary)
+			return mcp.NewToolResultText(text), nil
+		},
+	)
+
+	// Tool 1b: memory_prompt
+	s.AddTool(
+		mcp.NewTool("memory_prompt",
+			mcp.WithDescription("Capture the user's original request or goal for this session. Call this at the very start of a task, before any other memory operations, so future sessions can understand what was attempted and why."),
+			mcp.WithString("content",
+				mcp.Required(),
+				mcp.Description("The user's original request or goal, verbatim or closely paraphrased."),
+			),
+			mcp.WithArray("file_paths",
+				mcp.Description(`Files the request relates to, e.g. ["src/auth/middleware.go"]`),
+			),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			content, _ := args["content"].(string)
+			filePaths := extractStringSlice(args, "file_paths")
+
+			mem, _, err := k.Save(types.MemorySaveInput{
+				Content:   content,
+				Type:      types.MemoryTypeEvent,
+				Source:    types.MemorySourceAgent,
+				Tags:      []string{"prompt"},
 				FilePaths: filePaths,
 			})
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			tracker.recordSave(mem.ID, mem.Summary, mem.Type)
-			text := fmt.Sprintf("Saved memory %s (%s): %s", mem.ID, mem.Type, mem.Summary)
-			return mcp.NewToolResultText(text), nil
+			return mcp.NewToolResultText(fmt.Sprintf("Captured prompt %s: %s", mem.ID, mem.Summary)), nil
 		},
 	)
 

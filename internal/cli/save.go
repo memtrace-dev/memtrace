@@ -46,7 +46,7 @@ func newSaveCmd() *cobra.Command {
 				}
 			}
 
-			mem, err := k.Save(input)
+			mem, _, err := k.Save(input)
 			if err != nil {
 				return err
 			}

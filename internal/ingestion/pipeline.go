@@ -31,7 +31,7 @@ func (p *Pipeline) IngestOnInit(projectRoot string) *IngestResult {
 			return
 		}
 		for _, input := range inputs {
-			if _, saveErr := p.kernel.Save(input); saveErr == nil {
+			if _, _, saveErr := p.kernel.Save(input); saveErr == nil {
 				result.Total++
 				result.Sources[source]++
 			}

@@ -80,7 +80,7 @@ Examples:
 							continue
 						}
 
-						mem, err := k.Save(types.MemorySaveInput{
+						mem, _, err := k.Save(types.MemorySaveInput{
 							Content:   content,
 							Type:      mt,
 							Tags:      tags,

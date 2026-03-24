@@ -63,7 +63,7 @@ func setupProject(t *testing.T, memories ...types.MemorySaveInput) (*kernel.Memo
 	t.Cleanup(func() { k.Close() })
 
 	for _, m := range memories {
-		if _, err := k.Save(m); err != nil {
+		if _, _, err := k.Save(m); err != nil {
 			t.Fatalf("pre-populate save: %v", err)
 		}
 	}
@@ -281,7 +281,7 @@ func TestListCmd_JSONOutput(t *testing.T) {
 func TestRmCmd_ByFullID(t *testing.T) {
 	k, _ := setupProject(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "to be deleted"})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "to be deleted"})
 
 	out, err := runCmd(t, "rm", mem.ID)
 	if err != nil {
@@ -300,7 +300,7 @@ func TestRmCmd_ByFullID(t *testing.T) {
 func TestRmCmd_ByPrefix(t *testing.T) {
 	k, _ := setupProject(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "prefix deletion test"})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "prefix deletion test"})
 	prefix := mem.ID[:8]
 
 	out, err := runCmd(t, "rm", prefix)
@@ -329,7 +329,7 @@ func TestRmCmd_NotFound(t *testing.T) {
 func TestUpdateCmd_Content(t *testing.T) {
 	k, _ := setupProject(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "original content"})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "original content"})
 
 	out, err := runCmd(t, "update", mem.ID, "--content", "updated content")
 	if err != nil {
@@ -348,7 +348,7 @@ func TestUpdateCmd_Content(t *testing.T) {
 func TestUpdateCmd_Tags(t *testing.T) {
 	k, _ := setupProject(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "some memory", Tags: []string{"old"}})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "some memory", Tags: []string{"old"}})
 
 	_, err := runCmd(t, "update", mem.ID, "--tags", "new,tag")
 	if err != nil {
@@ -511,7 +511,7 @@ func TestImportCmd_FileNotFound(t *testing.T) {
 func TestEditCmd_UpdatesContent(t *testing.T) {
 	k, _ := setupProject(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "original content"})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "original content"})
 
 	// Use a fake editor that overwrites the file with new content
 	fakeEditor := filepath.Join(t.TempDir(), "fake-editor.sh")
@@ -537,7 +537,7 @@ func TestEditCmd_UpdatesContent(t *testing.T) {
 func TestEditCmd_NoChange(t *testing.T) {
 	k, _ := setupProject(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "unchanged content"})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "unchanged content"})
 
 	// Editor that leaves the file unchanged
 	fakeEditor := filepath.Join(t.TempDir(), "noop-editor.sh")

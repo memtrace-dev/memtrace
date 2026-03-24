@@ -289,7 +289,7 @@ func TestMemoryRecallTool_TypeFilter(t *testing.T) {
 func TestMemoryForgetTool_ByID(t *testing.T) {
 	s, k := setupServer(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "temporary memory to delete"})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "temporary memory to delete"})
 
 	result := callTool(t, s, "memory_forget", map[string]interface{}{
 		"id": mem.ID,
@@ -336,7 +336,7 @@ func TestMemoryForgetTool_ByIDNotFound(t *testing.T) {
 func TestMemoryUpdateTool_Content(t *testing.T) {
 	s, k := setupServer(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "original content"})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "original content"})
 
 	result := callTool(t, s, "memory_update", map[string]interface{}{
 		"id":      mem.ID,
@@ -356,7 +356,7 @@ func TestMemoryUpdateTool_Content(t *testing.T) {
 func TestMemoryUpdateTool_TypeAndTags(t *testing.T) {
 	s, k := setupServer(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "some fact", Type: types.MemoryTypeFact})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "some fact", Type: types.MemoryTypeFact})
 
 	callTool(t, s, "memory_update", map[string]interface{}{
 		"id":   mem.ID,
@@ -572,7 +572,7 @@ func TestSessionTracker_SaveTool_RecordsInTracker(t *testing.T) {
 func TestMemoryGetTool_ReturnsFullContent(t *testing.T) {
 	s, k := setupServer(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{
+	mem, _, _ := k.Save(types.MemorySaveInput{
 		Content: "We use JWT with RS256 for authentication. The API is stateless — no session storage.",
 		Type:    types.MemoryTypeDecision,
 		Tags:    []string{"auth"},
@@ -620,7 +620,7 @@ func TestMemoryGetTool_MissingID(t *testing.T) {
 func TestMemoryRecallTool_ShowsIDsForMemoryGet(t *testing.T) {
 	s, k := setupServer(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{Content: "We use Redis for caching"})
+	mem, _, _ := k.Save(types.MemorySaveInput{Content: "We use Redis for caching"})
 
 	result := callTool(t, s, "memory_recall", map[string]interface{}{
 		"query": "Redis caching",
@@ -689,7 +689,7 @@ func TestMemoryContextTool_IncludesMemoryGetHint(t *testing.T) {
 func TestMemoryContextTool_ShowsIDsForMemoryGet(t *testing.T) {
 	s, k := setupServer(t)
 
-	mem, _ := k.Save(types.MemorySaveInput{
+	mem, _, _ := k.Save(types.MemorySaveInput{
 		Content:   "Auth middleware validates JWT tokens",
 		FilePaths: []string{"src/auth/middleware.go"},
 	})
@@ -727,3 +727,115 @@ func TestSessionTracker_RecallTool_RecordsInTracker(t *testing.T) {
 	}
 }
 
+
+// --- memory_save topic_key ---
+
+func TestMemorySaveTool_TopicKey_CreatesNew(t *testing.T) {
+	s, _ := setupServer(t)
+
+	result := callTool(t, s, "memory_save", map[string]interface{}{
+		"content":   "We use PostgreSQL",
+		"topic_key": "decision/database",
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "Saved memory") {
+		t.Errorf("expected Saved, got: %s", text)
+	}
+}
+
+func TestMemorySaveTool_TopicKey_UpsertSaysUpdated(t *testing.T) {
+	s, _ := setupServer(t)
+
+	callTool(t, s, "memory_save", map[string]interface{}{
+		"content":   "We use PostgreSQL",
+		"topic_key": "decision/database",
+	})
+
+	result := callTool(t, s, "memory_save", map[string]interface{}{
+		"content":   "We switched to MySQL",
+		"topic_key": "decision/database",
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "Updated memory") {
+		t.Errorf("expected Updated for upsert, got: %s", text)
+	}
+}
+
+func TestMemorySaveTool_TopicKey_NoDuplicates(t *testing.T) {
+	s, k := setupServer(t)
+
+	for i := 0; i < 4; i++ {
+		callTool(t, s, "memory_save", map[string]interface{}{
+			"content":   "repeated fact",
+			"topic_key": "fact/repeated",
+		})
+	}
+
+	all, _ := k.List(types.ListOptions{Limit: 100})
+	count := 0
+	for _, m := range all {
+		if m.TopicKey == "fact/repeated" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 memory with topic_key, got %d", count)
+	}
+}
+
+// --- memory_prompt ---
+
+func TestMemoryPromptTool_Basic(t *testing.T) {
+	s, k := setupServer(t)
+
+	result := callTool(t, s, "memory_prompt", map[string]interface{}{
+		"content": "Refactor auth middleware to support OAuth",
+	})
+	text := resultText(t, result)
+	if !strings.Contains(text, "Captured prompt") {
+		t.Errorf("expected Captured prompt, got: %s", text)
+	}
+
+	all, _ := k.List(types.ListOptions{Limit: 10})
+	if len(all) != 1 {
+		t.Fatalf("expected 1 memory, got %d", len(all))
+	}
+	m := all[0]
+	if m.Type != types.MemoryTypeEvent {
+		t.Errorf("expected event type, got %s", m.Type)
+	}
+	found := false
+	for _, tag := range m.Tags {
+		if tag == "prompt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'prompt' tag, got %v", m.Tags)
+	}
+}
+
+func TestMemoryPromptTool_MissingContent(t *testing.T) {
+	s, _ := setupServer(t)
+
+	result := callTool(t, s, "memory_prompt", map[string]interface{}{})
+	// Empty content still saves (kernel handles empty content gracefully)
+	_ = result
+}
+
+func TestMemoryPromptTool_WithFilePaths(t *testing.T) {
+	s, k := setupServer(t)
+
+	callTool(t, s, "memory_prompt", map[string]interface{}{
+		"content":    "Fix the JWT validation bug",
+		"file_paths": []interface{}{"src/auth/middleware.go"},
+	})
+
+	all, _ := k.List(types.ListOptions{Limit: 10})
+	if len(all) == 0 {
+		t.Fatal("no memories saved")
+	}
+	if len(all[0].FilePaths) != 1 || all[0].FilePaths[0] != "src/auth/middleware.go" {
+		t.Errorf("unexpected file_paths: %v", all[0].FilePaths)
+	}
+}

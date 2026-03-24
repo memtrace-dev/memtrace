@@ -42,6 +42,7 @@ type Memory struct {
 	Tags         []string     `json:"tags"`
 	Status       MemoryStatus `json:"status"`
 	SupersededBy string       `json:"superseded_by,omitempty"`
+	TopicKey     string       `json:"topic_key,omitempty"`
 	CreatedAt    time.Time    `json:"created_at"`
 	UpdatedAt    time.Time    `json:"updated_at"`
 	AccessedAt   *time.Time   `json:"accessed_at,omitempty"`
@@ -58,6 +59,7 @@ type MemorySaveInput struct {
 	Confidence float64  // Default: 1.0, range 0.0-1.0
 	FilePaths  []string // Relative paths, max 20
 	Tags       []string // Max 20 tags, each max 50 chars
+	TopicKey   string   // Optional stable key; if set, re-saving upserts instead of creating a duplicate
 }
 
 // MemoryRecallInput is what callers provide to search memories.

@@ -83,7 +83,7 @@ Use --dry-run to preview what would be imported without saving.`,
 			saved := 0
 			for _, input := range inputs {
 				input.Source = types.MemorySourceImport
-				if _, err := k.Save(input); err == nil {
+				if _, _, err := k.Save(input); err == nil {
 					saved++
 				}
 			}

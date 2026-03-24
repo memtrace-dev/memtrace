@@ -88,7 +88,9 @@ func (k *MemoryKernel) Close() error {
 }
 
 // Save validates input, generates ID and timestamps, and writes to the store.
-func (k *MemoryKernel) Save(input types.MemorySaveInput) (*types.Memory, error) {
+// Returns the memory and a boolean indicating whether an existing memory was
+// updated via topic_key upsert (true) or a new one was created (false).
+func (k *MemoryKernel) Save(input types.MemorySaveInput) (*types.Memory, bool, error) {
 	// Apply defaults
 	if input.Type == "" {
 		input.Type = types.MemoryTypeFact
@@ -112,6 +114,38 @@ func (k *MemoryKernel) Save(input types.MemorySaveInput) (*types.Memory, error) 
 		input.Summary = truncate(input.Content, 120)
 	}
 
+	// Topic key upsert: if a key is provided and an active memory already has it,
+	// update that memory instead of creating a duplicate.
+	if input.TopicKey != "" {
+		existing, err := k.store.FindByTopicKey(k.projectID, input.TopicKey)
+		if err != nil {
+			return nil, false, fmt.Errorf("topic key lookup: %w", err)
+		}
+		if existing != nil {
+			updateInput := types.MemoryUpdateInput{
+				Content: &input.Content,
+				Summary: &input.Summary,
+			}
+			if input.Type != "" {
+				updateInput.Type = &input.Type
+			}
+			if len(input.Tags) > 0 {
+				updateInput.Tags = &input.Tags
+			}
+			if len(input.FilePaths) > 0 {
+				updateInput.FilePaths = &input.FilePaths
+			}
+			if input.Confidence != 1.0 {
+				updateInput.Confidence = &input.Confidence
+			}
+			mem, err := k.Update(existing.ID, updateInput)
+			if err != nil {
+				return nil, false, err
+			}
+			return mem, true, nil
+		}
+	}
+
 	now := time.Now().UTC()
 	mem := &types.Memory{
 		ID:         util.GenerateID(),
@@ -124,13 +158,14 @@ func (k *MemoryKernel) Save(input types.MemorySaveInput) (*types.Memory, error) 
 		ProjectID:  k.projectID,
 		FilePaths:  input.FilePaths,
 		Tags:       input.Tags,
+		TopicKey:   input.TopicKey,
 		Status:     types.MemoryStatusActive,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
 
 	if err := k.store.Insert(mem); err != nil {
-		return nil, fmt.Errorf("saving memory: %w", err)
+		return nil, false, fmt.Errorf("saving memory: %w", err)
 	}
 
 	// Compute and persist embedding asynchronously so Save() stays fast.
@@ -143,7 +178,7 @@ func (k *MemoryKernel) Save(input types.MemorySaveInput) (*types.Memory, error) 
 		}(mem.ID, mem.Content)
 	}
 
-	return mem, nil
+	return mem, false, nil
 }
 
 // Get retrieves a single memory by ID. Returns nil, nil if not found.

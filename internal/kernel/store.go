@@ -39,16 +39,32 @@ func (s *MemoryStore) Insert(m *types.Memory) error {
 			source, source_ref, confidence,
 			project_id, file_paths, tags,
 			status, superseded_by,
-			created_at, updated_at, accessed_at, access_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, updated_at, accessed_at, access_count,
+			topic_key
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, string(m.Type), m.Content, nullableString(m.Summary),
 		string(m.Source), nullableString(m.SourceRef), m.Confidence,
 		m.ProjectID, string(filePathsJSON), string(tagsJSON),
 		string(m.Status), nullableString(m.SupersededBy),
 		m.CreatedAt.Format(time.RFC3339Nano), m.UpdatedAt.Format(time.RFC3339Nano),
 		nil, 0,
+		nullableString(m.TopicKey),
 	)
 	return err
+}
+
+// FindByTopicKey returns the active memory with the given topic key for a project,
+// or nil if none exists.
+func (s *MemoryStore) FindByTopicKey(projectID, topicKey string) (*types.Memory, error) {
+	row := s.db.QueryRow(
+		"SELECT * FROM memories WHERE project_id = ? AND topic_key = ? AND status = 'active'",
+		projectID, topicKey,
+	)
+	m, err := scanMemory(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return m, err
 }
 
 // FindByID retrieves a memory by its ID. Returns nil, nil if not found.
@@ -396,6 +412,7 @@ func scanMemory(s scanner) (*types.Memory, error) {
 		createdStr, updatedStr           string
 		typeStr, sourceStr, statusStr    string
 		embedding                        sql.NullString // added by migration
+		topicKey                         sql.NullString // added by migration
 	)
 
 	err := s.Scan(
@@ -405,6 +422,7 @@ func scanMemory(s scanner) (*types.Memory, error) {
 		&statusStr, &supersededBy,
 		&createdStr, &updatedStr, &accessedAt, &m.AccessCount,
 		&embedding,
+		&topicKey,
 	)
 	if err != nil {
 		return nil, err
@@ -416,6 +434,7 @@ func scanMemory(s scanner) (*types.Memory, error) {
 	m.Summary = summary.String
 	m.SourceRef = sourceRef.String
 	m.SupersededBy = supersededBy.String
+	m.TopicKey = topicKey.String
 
 	m.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
 	m.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedStr)

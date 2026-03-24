@@ -84,6 +84,16 @@ func runMigrations(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "memories", "embedding", "TEXT DEFAULT NULL"); err != nil {
 		return fmt.Errorf("migration (embedding column): %w", err)
 	}
+	if err := addColumnIfMissing(db, "memories", "topic_key", "TEXT DEFAULT NULL"); err != nil {
+		return fmt.Errorf("migration (topic_key column): %w", err)
+	}
+	if _, err := db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_topic_key
+		ON memories(project_id, topic_key)
+		WHERE topic_key IS NOT NULL
+	`); err != nil {
+		return fmt.Errorf("migration (topic_key index): %w", err)
+	}
 	return nil
 }
 

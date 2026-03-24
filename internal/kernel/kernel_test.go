@@ -27,7 +27,7 @@ func setupTestKernel(t *testing.T) *MemoryKernel {
 func TestKernel_Save_Defaults(t *testing.T) {
 	k := setupTestKernel(t)
 
-	mem, err := k.Save(types.MemorySaveInput{
+	mem, _, err := k.Save(types.MemorySaveInput{
 		Content: "We use PostgreSQL as the main database",
 	})
 	if err != nil {
@@ -60,7 +60,7 @@ func TestKernel_Save_Defaults(t *testing.T) {
 func TestKernel_Save_ExplicitType(t *testing.T) {
 	k := setupTestKernel(t)
 
-	mem, err := k.Save(types.MemorySaveInput{
+	mem, _, err := k.Save(types.MemorySaveInput{
 		Content: "We chose JWT over sessions",
 		Type:    types.MemoryTypeDecision,
 		Tags:    []string{"auth"},
@@ -79,7 +79,7 @@ func TestKernel_Save_ExplicitType(t *testing.T) {
 func TestKernel_Get(t *testing.T) {
 	k := setupTestKernel(t)
 
-	saved, _ := k.Save(types.MemorySaveInput{Content: "test memory"})
+	saved, _, _ := k.Save(types.MemorySaveInput{Content: "test memory"})
 
 	got, err := k.Get(saved.ID)
 	if err != nil {
@@ -106,7 +106,7 @@ func TestKernel_Get_NotFound(t *testing.T) {
 
 func TestKernel_Delete(t *testing.T) {
 	k := setupTestKernel(t)
-	saved, _ := k.Save(types.MemorySaveInput{Content: "to be deleted"})
+	saved, _, _ := k.Save(types.MemorySaveInput{Content: "to be deleted"})
 
 	deleted, err := k.Delete(saved.ID)
 	if err != nil {
@@ -124,7 +124,7 @@ func TestKernel_Delete(t *testing.T) {
 
 func TestKernel_Update_Status(t *testing.T) {
 	k := setupTestKernel(t)
-	saved, _ := k.Save(types.MemorySaveInput{Content: "active memory"})
+	saved, _, _ := k.Save(types.MemorySaveInput{Content: "active memory"})
 
 	archived := types.MemoryStatusArchived
 	updated, err := k.Update(saved.ID, types.MemoryUpdateInput{Status: &archived})
@@ -217,7 +217,7 @@ func TestKernel_Recall_LimitEnforced(t *testing.T) {
 
 func TestKernel_Recall_UpdatesAccessCount(t *testing.T) {
 	k := setupTestKernel(t)
-	saved, _ := k.Save(types.MemorySaveInput{Content: "access tracking test memory"})
+	saved, _, _ := k.Save(types.MemorySaveInput{Content: "access tracking test memory"})
 
 	k.Recall(types.MemoryRecallInput{Query: "access tracking", Limit: 5})
 
@@ -441,7 +441,7 @@ func TestScanStaleness_FileModified(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mem, _ := k.Save(types.MemorySaveInput{
+	mem, _, _ := k.Save(types.MemorySaveInput{
 		Content:   "database uses postgres",
 		FilePaths: []string{"src/db.go"},
 	})
@@ -578,5 +578,88 @@ func TestContextForFiles_DeduplicatesAcrossSources(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected memory to appear exactly once, appeared %d times", count)
+	}
+}
+
+// --- topic_key upsert ---
+
+func TestKernel_Save_TopicKey_CreatesNew(t *testing.T) {
+	k := setupTestKernel(t)
+
+	mem, upserted, err := k.Save(types.MemorySaveInput{
+		Content:  "We use PostgreSQL",
+		TopicKey: "decision/database",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if upserted {
+		t.Error("expected upserted=false for new memory")
+	}
+	if mem.TopicKey != "decision/database" {
+		t.Errorf("expected topic_key persisted, got %q", mem.TopicKey)
+	}
+}
+
+func TestKernel_Save_TopicKey_UpsertUpdates(t *testing.T) {
+	k := setupTestKernel(t)
+
+	first, _, _ := k.Save(types.MemorySaveInput{
+		Content:  "We use PostgreSQL",
+		TopicKey: "decision/database",
+	})
+
+	second, upserted, err := k.Save(types.MemorySaveInput{
+		Content:  "We switched to MySQL",
+		TopicKey: "decision/database",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !upserted {
+		t.Error("expected upserted=true for existing topic_key")
+	}
+	if second.ID != first.ID {
+		t.Errorf("upsert should return same ID: want %s, got %s", first.ID, second.ID)
+	}
+
+	got, _ := k.Get(first.ID)
+	if got.Content != "We switched to MySQL" {
+		t.Errorf("content not updated: %q", got.Content)
+	}
+}
+
+func TestKernel_Save_TopicKey_NoDuplicates(t *testing.T) {
+	k := setupTestKernel(t)
+
+	for i := 0; i < 5; i++ {
+		k.Save(types.MemorySaveInput{
+			Content:  "repeated save",
+			TopicKey: "fact/repeated",
+		})
+	}
+
+	all, _ := k.List(types.ListOptions{Limit: 100})
+	count := 0
+	for _, m := range all {
+		if m.TopicKey == "fact/repeated" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 memory with topic_key, got %d", count)
+	}
+}
+
+func TestKernel_Save_NoTopicKey_AlwaysCreates(t *testing.T) {
+	k := setupTestKernel(t)
+
+	for i := 0; i < 3; i++ {
+		k.Save(types.MemorySaveInput{Content: "no key memory"})
+	}
+
+	all, _ := k.List(types.ListOptions{Limit: 100})
+	if len(all) != 3 {
+		t.Errorf("without topic_key, should create 3 separate memories, got %d", len(all))
 	}
 }
