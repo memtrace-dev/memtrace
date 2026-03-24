@@ -16,7 +16,7 @@ Copy-pasting context into every chat doesn't scale. `CLAUDE.md` helps, but it's 
 
 ## How it works
 
-Memtrace runs as a local MCP server backed by SQLite inside your project. Your agent calls three tools:
+Memtrace runs as a local MCP server backed by SQLite inside your project. Your agent calls tools to save and search memories:
 
 ```
 Session 1
@@ -69,7 +69,7 @@ claude mcp add memtrace memtrace serve
 # 3. Start a new Claude Code session — memory is live
 ```
 
-That's it. Your agent now has `memory_save`, `memory_recall`, and `memory_forget` available in every session.
+That's it. Your agent now has `memory_save`, `memory_recall`, `memory_forget`, `memory_update`, and `memory_context` available in every session.
 
 ---
 
@@ -166,6 +166,19 @@ memory_update(
   confidence: 0.8
 )
 ```
+
+### `memory_context`
+
+Get all memories relevant to a set of files you are about to read or edit. Combines direct file-path matching with inferred keyword recall — call this at the start of any task touching specific files.
+
+```
+memory_context(
+  file_paths: ["src/auth/middleware.go", "src/auth/handler.go"],
+  limit:      10
+)
+```
+
+Returns file-matched memories first (labeled `[file match]`), followed by semantically related memories (`[related]`).
 
 ---
 
