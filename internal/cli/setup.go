@@ -195,10 +195,16 @@ description: memtrace memory instructions
 alwaysApply: true
 ---
 
-This project uses the memtrace MCP server for persistent memory. When it is connected (memtrace tools are available):
-- Call memory_recall at the start of any non-trivial task
-- Call memory_save when you learn something worth remembering across sessions
-- Call memory_forget when the user asks to remove a memory — do not use built-in memory tools
+This project has the memtrace MCP server connected. Use its tools for all memory operations — never use built-in memory tools.
+
+Memory tools: memory_recall, memory_save, memory_get, memory_update, memory_forget, memory_context, memory_prompt
+
+Rules:
+- Before every task — call memory_recall with a relevant query, no exceptions. This includes commits, quick fixes, and one-liners.
+- Before committing — call memory_recall to check for commit conventions.
+- Learn something new — call memory_save to persist it.
+- User says forget/delete/remove — call memory_forget.
+- Never write memory files manually or use built-in memory features.
 `
 
 // addToCursorRules writes a memtrace rule file to .cursor/rules/memtrace.mdc.
