@@ -135,10 +135,17 @@ func setupAgent(agent, projectRoot string, global bool) (bool, error) {
 		} else {
 			configPath = filepath.Join(projectRoot, ".claude", "mcp.json")
 		}
-		return writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
+		written, err := writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
 			"command": "memtrace",
 			"args":    []string{"serve"},
 		})
+		if err != nil {
+			return false, err
+		}
+		if !global {
+			addToClaudeMd(projectRoot)
+		}
+		return written, nil
 
 	case "cursor":
 		configPath := filepath.Join(projectRoot, ".cursor", "mcp.json")
@@ -154,11 +161,16 @@ func setupAgent(agent, projectRoot string, global bool) (bool, error) {
 
 	case "vscode":
 		configPath := filepath.Join(projectRoot, ".vscode", "mcp.json")
-		return writeMCPEntry(configPath, "servers", map[string]interface{}{
+		written, err := writeMCPEntry(configPath, "servers", map[string]interface{}{
 			"type":    "stdio",
 			"command": "memtrace",
 			"args":    []string{"serve"},
 		})
+		if err != nil {
+			return false, err
+		}
+		addToCopilotInstructions(projectRoot)
+		return written, nil
 
 	case "opencode":
 		configPath := filepath.Join(projectRoot, "opencode.json")
@@ -173,29 +185,36 @@ func setupAgent(agent, projectRoot string, global bool) (bool, error) {
 			return false, fmt.Errorf("could not find home directory: %w", err)
 		}
 		configPath := filepath.Join(home, ".codeium", "windsurf", "mcp_config.json")
-		return writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
+		written, err := writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
 			"command": "memtrace",
 			"args":    []string{"serve"},
 		})
+		if err != nil {
+			return false, err
+		}
+		addToWindsurfRules(projectRoot)
+		return written, nil
 
 	case "gemini":
 		configPath := filepath.Join(projectRoot, ".gemini", "settings.json")
-		return writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
+		written, err := writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
 			"command": "memtrace",
 			"args":    []string{"serve"},
 		})
+		if err != nil {
+			return false, err
+		}
+		addToGeminiMd(projectRoot)
+		return written, nil
 
 	default:
 		return false, fmt.Errorf("unknown agent %q — supported: claude-code, cursor, vscode, opencode, windsurf, gemini", agent)
 	}
 }
 
-const cursorRulesSnippet = `---
-description: memtrace memory instructions
-alwaysApply: true
----
-
-This project has the memtrace MCP server connected. Use its tools for all memory operations — never use built-in memory tools.
+// memtraceInstructionsCore is the shared instructions text injected into every
+// agent's rules/instructions file. All agent-specific snippets derive from this.
+const memtraceInstructionsCore = `This project has the memtrace MCP server connected. Use its tools for all memory operations — never use built-in memory tools.
 
 Memory tools: memory_recall, memory_save, memory_get, memory_update, memory_forget, memory_context, memory_prompt
 
@@ -204,8 +223,27 @@ Rules:
 - Before committing — call memory_recall to check for commit conventions.
 - Learn something new — call memory_save to persist it.
 - User says forget/delete/remove — call memory_forget.
-- Never write memory files manually or use built-in memory features.
-`
+- Never write memory files manually or use built-in memory features.`
+
+// claudeMdSnippet wraps the core in a CLAUDE.md section.
+const claudeMdSnippet = "\n## memtrace (memory)\n\n" + memtraceInstructionsCore + "\n"
+
+// cursorRulesSnippet wraps the core in Cursor's MDC format.
+const cursorRulesSnippet = "---\ndescription: memtrace memory instructions\nalwaysApply: true\n---\n\n" + memtraceInstructionsCore + "\n"
+
+// copilotInstructionsSnippet wraps the core for .github/copilot-instructions.md.
+const copilotInstructionsSnippet = "\n## memtrace\n\n" + memtraceInstructionsCore + "\n"
+
+// windsurfRulesSnippet wraps the core for .windsurfrules.
+const windsurfRulesSnippet = "\n# memtrace\n\n" + memtraceInstructionsCore + "\n"
+
+// geminiMdSnippet wraps the core for GEMINI.md.
+const geminiMdSnippet = "\n## memtrace\n\n" + memtraceInstructionsCore + "\n"
+
+// addToClaudeMd appends memtrace instructions to CLAUDE.md if not already present.
+func addToClaudeMd(projectRoot string) {
+	appendInstructions(filepath.Join(projectRoot, "CLAUDE.md"), claudeMdSnippet)
+}
 
 // addToCursorRules writes a memtrace rule file to .cursor/rules/memtrace.mdc.
 // It is idempotent — if the file already exists it is left unchanged.
@@ -219,6 +257,39 @@ func addToCursorRules(projectRoot string) {
 		return // already exists
 	}
 	_ = os.WriteFile(rulePath, []byte(cursorRulesSnippet), 0644)
+}
+
+// addToCopilotInstructions appends memtrace instructions to .github/copilot-instructions.md.
+func addToCopilotInstructions(projectRoot string) {
+	dir := filepath.Join(projectRoot, ".github")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+	appendInstructions(filepath.Join(dir, "copilot-instructions.md"), copilotInstructionsSnippet)
+}
+
+// addToWindsurfRules appends memtrace instructions to .windsurfrules.
+func addToWindsurfRules(projectRoot string) {
+	appendInstructions(filepath.Join(projectRoot, ".windsurfrules"), windsurfRulesSnippet)
+}
+
+// addToGeminiMd appends memtrace instructions to GEMINI.md.
+func addToGeminiMd(projectRoot string) {
+	appendInstructions(filepath.Join(projectRoot, "GEMINI.md"), geminiMdSnippet)
+}
+
+// appendInstructions appends snippet to path if "memtrace" is not already present.
+func appendInstructions(path, snippet string) {
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "memtrace") {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(snippet)
 }
 
 // writeMCPEntry reads (or creates) the JSON config at path, merges the memtrace
