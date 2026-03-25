@@ -191,6 +191,15 @@ func (k *MemoryKernel) Update(id string, input types.MemoryUpdateInput) (*types.
 	if err := k.store.Update(id, input); err != nil {
 		return nil, fmt.Errorf("updating memory: %w", err)
 	}
+	// Re-embed asynchronously when content changes so the vector stays in sync.
+	if input.Content != nil && k.embedder != nil {
+		go func(id, text string) {
+			vec, err := k.embedder.Embed(text)
+			if err == nil {
+				_ = k.store.StoreEmbedding(id, vec)
+			}
+		}(id, *input.Content)
+	}
 	return k.store.FindByID(id)
 }
 

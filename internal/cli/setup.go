@@ -142,10 +142,15 @@ func setupAgent(agent, projectRoot string, global bool) (bool, error) {
 
 	case "cursor":
 		configPath := filepath.Join(projectRoot, ".cursor", "mcp.json")
-		return writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
+		written, err := writeMCPEntry(configPath, "mcpServers", map[string]interface{}{
 			"command": "memtrace",
 			"args":    []string{"serve"},
 		})
+		if err != nil {
+			return false, err
+		}
+		addToCursorRules(projectRoot)
+		return written, nil
 
 	case "vscode":
 		configPath := filepath.Join(projectRoot, ".vscode", "mcp.json")
@@ -183,6 +188,31 @@ func setupAgent(agent, projectRoot string, global bool) (bool, error) {
 	default:
 		return false, fmt.Errorf("unknown agent %q — supported: claude-code, cursor, vscode, opencode, windsurf, gemini", agent)
 	}
+}
+
+const cursorRulesSnippet = `---
+description: memtrace memory instructions
+alwaysApply: true
+---
+
+This project uses the memtrace MCP server for persistent memory. When it is connected (memtrace tools are available):
+- Call memory_recall at the start of any non-trivial task
+- Call memory_save when you learn something worth remembering across sessions
+- Call memory_forget when the user asks to remove a memory — do not use built-in memory tools
+`
+
+// addToCursorRules writes a memtrace rule file to .cursor/rules/memtrace.mdc.
+// It is idempotent — if the file already exists it is left unchanged.
+func addToCursorRules(projectRoot string) {
+	rulesDir := filepath.Join(projectRoot, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		return
+	}
+	rulePath := filepath.Join(rulesDir, "memtrace.mdc")
+	if _, err := os.Stat(rulePath); err == nil {
+		return // already exists
+	}
+	_ = os.WriteFile(rulePath, []byte(cursorRulesSnippet), 0644)
 }
 
 // writeMCPEntry reads (or creates) the JSON config at path, merges the memtrace
