@@ -36,7 +36,36 @@ func newInitCmd() *cobra.Command {
 
 			// Check if already initialized
 			if info, err := os.Stat(memtraceDir); err == nil && info.IsDir() {
-				fmt.Printf("memtrace is already initialized in %s\n", projectRoot)
+				// Directory exists — check whether this project is registered in the
+				// global config (it may not be if the DB was created on another machine
+				// or the config was lost). If it's missing, register it and open the DB
+				// to ensure the schema is up to date.
+				cfg := util.GetProjectConfig()
+				if _, registered := cfg.Projects[projectRoot]; registered {
+					fmt.Printf("memtrace is already initialized in %s\n", projectRoot)
+					return nil
+				}
+				projectName := name
+				if projectName == "" {
+					projectName = filepath.Base(projectRoot)
+				}
+				projectID := util.GenerateID()
+				cfg.Projects[projectRoot] = util.ProjectEntry{
+					ID:        projectID,
+					Name:      projectName,
+					CreatedAt: time.Now().UTC().Format(time.RFC3339),
+				}
+				if err := util.SaveProjectConfig(cfg); err != nil {
+					return fmt.Errorf("saving config: %w", err)
+				}
+				dbPath := util.GetProjectDbPath(projectRoot)
+				k := kernel.New(dbPath, projectID)
+				if err := k.Open(); err != nil {
+					return fmt.Errorf("initializing database: %w", err)
+				}
+				k.Close()
+				fmt.Printf("Re-registered memtrace project in %s\n", projectRoot)
+				fmt.Println("\nNext: run 'memtrace setup' to wire the MCP server into your agent.")
 				return nil
 			}
 
